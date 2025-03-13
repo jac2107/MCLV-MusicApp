@@ -1,0 +1,2 @@
+C:/Users/Jhoan/Desktop/MusicApp/musicapp/android/app/.cxx/Debug/6b386273/x86_64/CMakeFiles/edit_cache.dir
+C:/Users/Jhoan/Desktop/MusicApp/musicapp/android/app/.cxx/Debug/6b386273/x86_64/CMakeFiles/rebuild_cache.dir

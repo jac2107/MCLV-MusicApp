@@ -1,0 +1,50 @@
+name: musicapp
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  diacritic: ^0.1.3
+  cupertino_icons: ^1.0.8
+  google_fonts: ^6.1.0
+  url_launcher: ^6.1.14
+  audioplayers: 5.2.1
+  webview_flutter: ^4.2.4  # Última versión estable
+  youtube_player_flutter: ^9.1.1  # Asegúrate de usar la última versión
+  flutter_sound: ^9.2.13
+  just_audio: ^0.9.46
+  permission_handler: ^11.4.0
+  palette_generator: ^0.3.0
+  flutter_color: ^2.1.0
+  firebase_core: ^3.12.1
+
+  #http: ^1.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icono.png"  # Imagen con márgenes
+  adaptive_icon_foreground: "assets/icono.png"
+  adaptive_icon_background: "#FFFFFF"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/image.png
+    - assets/adoracion.png
+    - assets/image4.png
+    - assets/worship.png
+    - assets/sounds/metronome_tick.mp3
+    - assets/icono.png
