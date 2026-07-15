@@ -1,15 +1,13 @@
 plugins {
     id "com.android.application"
-    // START: FlutterFire Configuration
-    id 'com.google.gms.google-services'
-    // END: FlutterFire Configuration
     id "kotlin-android"
     id "dev.flutter.flutter-gradle-plugin"
+    id 'com.google.gms.google-services' // Asegúrate de que esta línea esté aquí
 }
 
 android {
     namespace "com.example.musicapp"
-    compileSdk 34  // Para Flutter 3.29.0, se recomienda compileSdk 34
+    compileSdk 35  // Para Flutter 3.29.0, se recomienda compileSdk 34
 
     ndkVersion "25.1.8937393"  // Puedes actualizarlo si es necesario
 
@@ -25,7 +23,7 @@ android {
     defaultConfig {
         applicationId "com.example.musicapp"
         minSdkVersion 24  // Mínimo compatible con flutter_sound
-        targetSdkVersion 34  // Usa el mismo valor que compileSdk
+        targetSdkVersion 35  // Usa el mismo valor que compileSdk
         versionCode 1
         versionName "1.0"
     }
@@ -35,6 +33,13 @@ android {
             signingConfig signingConfigs.debug
         }
     }
+}
+
+dependencies {
+    implementation 'com.google.firebase:firebase-messaging:24.1.0' // Asegúrate de tener la última versión
+    implementation platform('com.google.firebase:firebase-bom:33.10.0') // Usa la última versión de BOM
+    implementation 'com.google.firebase:firebase-messaging'
+    implementation 'com.google.firebase:firebase-firestore:24.11.0'
 }
 
 flutter {

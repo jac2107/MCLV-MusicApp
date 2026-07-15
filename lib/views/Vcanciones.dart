@@ -5,6 +5,7 @@ import 'package:palette_generator/palette_generator.dart';
 import '../models/Mcanciones.dart';
 import 'dart:async';
 import 'package:http/http.dart' as http;
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class Vcanciones extends StatefulWidget {
   final Song cancion;
@@ -29,6 +30,7 @@ class _VcancionesState extends State<Vcanciones> {
   bool showSpeedOptions = false;
   double scrollSpeed = 1.0; 
 
+
   late YoutubePlayerController _multitrackController; 
   late YoutubePlayerController _youtubeController; 
 
@@ -43,43 +45,51 @@ class _VcancionesState extends State<Vcanciones> {
   String? currentInstrument; 
   String? videoId;
   bool _isContentVisible = false; // Estado para controlar la visibilidad del contenido
-
+bool _metronomeRunning = false;
+int _intervalMs = 0;
+late DateTime _metronomeStart;
+Timer? _metronomeTimer;
   @override
-  void initState() {
-    super.initState();
-    _initializeYoutubeControllers();
-    _thumbnailFuture = _getThumbnailUrl();
-    _extractColorsFromImage();
+void initState() {
+  super.initState();
+  _initializeYoutubeControllers();
+  _thumbnailFuture = _getThumbnailUrl();
+  _extractColorsFromImage();
 
-    // Simular carga de 2 segundos
-    Future.delayed(Duration(seconds: 2), () {
-      setState(() {
-        _isContentVisible = true; // Hacer que el contenido sea visible
-      });
+  // Simula carga de 2 segundos para mostrar el contenido
+  Future.delayed(Duration(seconds: 2), () {
+    setState(() {
+      _isContentVisible = true;
     });
-  }
+  });
+  
+  // Precargar el sonido para minimizar la latencia
+  // Asegúrate de que el asset esté declarado en pubspec.yaml
+  player.setSource(AssetSource('sounds/metronome_tick.mp3'));
+}
 
-  Future<String> _getThumbnailUrl() async {
-    if (widget.cancion.youtubeLink != null &&
-        widget.cancion.youtubeLink != "null" &&
-        widget.cancion.youtubeLink!.isNotEmpty) {
-      videoId = YoutubePlayer.convertUrlToId(widget.cancion.youtubeLink!);
-      final String maxresUrl = 'https://img.youtube.com/vi/$videoId/maxresdefault.jpg';
-      final String fallbackUrl = 'https://img.youtube.com/vi/$videoId/0.jpg';
+Future<String> _getThumbnailUrl() async {
+  if (widget.cancion.youtubeLink != null &&
+      widget.cancion.youtubeLink != "null" &&
+      widget.cancion.youtubeLink!.isNotEmpty) {
+    videoId = YoutubePlayer.convertUrlToId(widget.cancion.youtubeLink!);
+    final String maxresUrl = 'https://img.youtube.com/vi/$videoId/maxresdefault.jpg';
+    final String fallbackUrl = 'https://img.youtube.com/vi/$videoId/0.jpg';
 
-      try {
-        final response = await http.get(Uri.parse(maxresUrl));
-        if (response.statusCode == 200) {
-          return maxresUrl; // Devuelve la miniatura si existe
-        } else {
-          return fallbackUrl; // Si no existe, devuelve el primer fotograma
-        }
-      } catch (e) {
-        return fallbackUrl; // En caso de error, devuelve el primer fotograma
+    try {
+      final response = await http.get(Uri.parse(maxresUrl));
+      if (response.statusCode == 200) {
+        return maxresUrl; // Devuelve la miniatura si existe
+      } else {
+        return fallbackUrl; // Si no existe, devuelve el primer fotograma
       }
+    } catch (e) {
+      // Manejo de errores: devuelve la imagen predeterminada en caso de error
+      print('Error al obtener la miniatura: $e'); // Imprime el error en la consola
     }
-    return ''; // Si no hay enlace, retorna una cadena vacía
   }
+  return 'assets/image.png'; // Si no hay enlace, retorna la imagen predeterminada
+}
 
   void _initializeYoutubeControllers() {
     _multitrackController = YoutubePlayerController(
@@ -92,15 +102,33 @@ class _VcancionesState extends State<Vcanciones> {
       ),
     );
 
-    _youtubeController = YoutubePlayerController(
-      initialVideoId: widget.cancion.youtubeLink != null && widget.cancion.youtubeLink != "null"
-          ? YoutubePlayer.convertUrlToId(widget.cancion.youtubeLink!)!
-          : '',
-      flags: const YoutubePlayerFlags(
-        autoPlay: false,
-        mute: false,
-      ),
-    );
+   _youtubeController = YoutubePlayerController(
+  initialVideoId: widget.cancion.youtubeLink != null && widget.cancion.youtubeLink != "null"
+      ? YoutubePlayer.convertUrlToId(widget.cancion.youtubeLink!)!
+      : '',
+  flags: const YoutubePlayerFlags(
+    autoPlay: false,
+    mute: false,
+  ),
+);
+
+// Widget que contiene el reproductor con gestos
+GestureDetector(
+  onDoubleTap: () {
+    _youtubeController.seekTo(_youtubeController.value.position + Duration(seconds: 10));
+  },
+  onLongPress: () {
+    _youtubeController.setPlaybackRate(2.0); // Aumentar velocidad a x2
+  },
+  onLongPressEnd: (_) {
+    _youtubeController.setPlaybackRate(1.0); // Volver a velocidad normal
+  },
+  child: YoutubePlayer(
+    controller: _youtubeController,
+    showVideoProgressIndicator: true,
+  ),
+);
+
   }
 
   Future<void> _extractColorsFromImage() async {
@@ -115,20 +143,31 @@ class _VcancionesState extends State<Vcanciones> {
         Color dominantColor = paletteGenerator.dominantColor?.color ?? Colors.blue;
 
         primaryColor = dominantColor;
-        secondaryColor = lighten(dominantColor, 0.2);
-        accentColor = darken(dominantColor, 0.2);
+        secondaryColor = _getContrastingColor(lighten(dominantColor, 0.2));
+        accentColor = _getContrastingColor(darken(dominantColor, 0.2));
       } catch (e) {
-        primaryColor = Color.fromARGB(255, 18, 60, 140);
-        secondaryColor = Color.fromARGB(255, 50, 86, 151);
-        accentColor = Colors.red;
+        primaryColor = Color.fromARGB(255, 0, 0, 0);  // Negro profundo
+        secondaryColor = Color.fromARGB(255, 161, 119, 69);  // Dorado oscuro
+        accentColor = Color.fromARGB(255, 96, 139, 151);  // Azul grisáceo
       }
     } else {
-      primaryColor = Color.fromARGB(255, 18, 60, 140);
-      secondaryColor = Color.fromARGB(255, 50, 86, 151);
-      accentColor = Colors.red;
+      primaryColor = Color.fromARGB(255, 0, 0, 0);  // Negro profundo
+      secondaryColor = Color.fromARGB(255, 161, 119, 69);  // Dorado oscuro
+      accentColor = Color.fromARGB(255, 96, 139, 151);  // Azul grisáceo
     }
 
     setState(() {});
+  }
+
+  Color _getContrastingColor(Color color) {
+    // Calcular la luminancia
+    double luminance = (0.299 * color.red + 0.587 * color.green + 0.114 * color.blue) / 255;
+
+    // Si la luminancia es alta, oscurecer el color
+    if (luminance > 0.7) {
+      return darken(color, 0.3); // Oscurecer el color
+    }
+    return color; // Retornar el color original si ya es suficientemente oscuro
   }
 
   Color lighten(Color color, [double amount = 0.1]) {
@@ -152,83 +191,137 @@ class _VcancionesState extends State<Vcanciones> {
   }
 
   @override
-  void dispose() {
-    stopMetronome();
-    stopAutoscroll();
-    player.dispose();
-    _multitrackController.dispose();
-    _youtubeController.dispose();
-    _scrollController.dispose();
-    super.dispose();
-  }
+void dispose() {
+  stopMetronome();
+  stopAutoscroll();
+  player.dispose();
+  _multitrackController.dispose();
+  _youtubeController.dispose();
+  _scrollController.dispose();
+  super.dispose();
+}
 
 List<TextSpan> parseLyrics(String text) {
-  final chordRegex = RegExp(r'\b[A-G][#b]?(m|maj|min|dim|aug|sus\d*|7|m7)?\d*\b');
-  final keywordRegex = RegExp(r'\b(CANCIÓN|TONALIDAD|TIEMPO|INTRO|VERSO 1|VERSO|VERSO 2|VERSO 3|PRE-CORO|CORO|INSTRUMENTAL|SOLO|PUENTE)\b');
+  // 1) Regex de acordes: 
+  //    - detecta A–G con opcional #/b, sufijos y dígitos,
+  //    - opcionalmente "/[A-G][#b]?..." para bajos compuestos,
+  //    - se asegura de que esté entre espacios o bordes de línea.
+  final chordRegex = RegExp(
+    r'(?<=^|\s)' +                                // antes: inicio o espacio
+    r'(?:' +
+      r'[A-G][#b]?'+                              // raíz con opcional #/b
+      r'(?:m|maj|min|dim|aug|sus\d*|7|m7)?' +     // sufijos
+      r'\d*' +                                    // dígitos opcionales
+    r')' +
+    r'(?:\/' +                                    // opcional bajo compuesto
+      r'[A-G][#b]?' +
+      r'(?:m|maj|min|dim|aug|sus\d*|7|m7)?' +
+      r'\d*' +
+    r')?' +
+    r'(?=$|\s)'                                   // después: fin o espacio
+  );
+
+  // 2) Regex de keywords (igual que antes)
+  final keywordRegex = RegExp(
+  r'\b(?:CANCIÓN|TONALIDAD|TIEMPO|INTRO|VERSO(?: \d+)?|PRE-CORO|CORO 1 Y 2|CORO(?: \d+)?|INSTRUMENTAL|FINAL|ESTROFA|SOLO|PUENTE(?: \d+)?|BAJO|SALIDA(?: \d+)?)\b');
 
   List<TextSpan> spans = [];
-  text.split('\n').forEach((line) {
-    List<TextSpan> lineSpans = [];
-    line.split(' ').forEach((word) {
-      String transposedWord = word; // Mantener palabra original por defecto
 
-      if (chordRegex.hasMatch(word)) {
-        transposedWord = transposeChord(word); // Solo transponer si es un acorde
+  for (var line in text.split('\n')) {
+    final matches = <RegExpMatch>[
+      ...keywordRegex.allMatches(line),
+      ...chordRegex.allMatches(line),
+    ]..sort((a, b) => a.start.compareTo(b.start));
+
+    int currentIndex = 0;
+    for (var match in matches) {
+      if (match.start > currentIndex) {
+        spans.add(TextSpan(
+          text: line.substring(currentIndex, match.start),
+          style: TextStyle(color: Colors.black),
+        ));
       }
 
-      TextStyle textStyle;
-      if (chordRegex.hasMatch(word)) {
-        textStyle = TextStyle(color: primaryColor ?? Color(0xFF4A90E2), fontWeight: FontWeight.bold);
-      } else if (keywordRegex.hasMatch(word.toUpperCase())) {
-        textStyle = TextStyle(color: secondaryColor ?? Color(0xFF4A90E2), fontWeight: FontWeight.bold);
+      final token = match.group(0)!;
+      TextStyle style;
+      String rendered;
+
+      if (chordRegex.hasMatch(token)) {
+        rendered = transposeChord(token);
+        style = TextStyle(
+          color: secondaryColor ?? Color(0xFF4A90E2),
+          fontWeight: FontWeight.bold,
+        );
       } else {
-        textStyle = TextStyle(color: Colors.black);
+        rendered = token;
+        style = TextStyle(
+          color: accentColor ?? Color(0xFF4A90E2),
+          fontWeight: FontWeight.bold,
+        );
       }
 
-      lineSpans.add(TextSpan(text: '$transposedWord ', style: textStyle));
-    });
+      spans.add(TextSpan(text: rendered, style: style));
+      currentIndex = match.end;
+    }
+
+    if (currentIndex < line.length) {
+      spans.add(TextSpan(
+        text: line.substring(currentIndex),
+        style: TextStyle(color: Colors.black),
+      ));
+    }
     spans.add(TextSpan(text: '\n'));
-    spans.addAll(lineSpans);
-  });
+  }
+
   return spans;
 }
 
 
 String transposeChord(String chord) {
-  const List<String> chordList = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-  const List<String> chordListFlat = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
-
-  // Si el acorde tiene un bajo invertido (ejemplo: G/Em, A/C#)
+  // 1) Soportar bajos invertidos (e.g. G/Bb)
   if (chord.contains('/')) {
-    List<String> parts = chord.split('/');
-    if (parts.length == 2) {
-      String transposedRoot = transposeChord(parts[0]); // Transponer el primer acorde
-      String transposedBass = transposeChord(parts[1]); // Transponer el acorde del bajo
-      return '$transposedRoot/$transposedBass';
-    }
+    final parts = chord.split('/');
+    return '${transposeChord(parts[0])}/${transposeChord(parts[1])}';
   }
 
-  // Expresión regular mejorada para capturar correctamente los acordes
-  final chordRegex = RegExp(r'^([A-G][#b]?)(.*)$');
+  // 2) Separar raíz y sufijo
+  final m = RegExp(r'^([A-G][#b]?)(.*)$').firstMatch(chord);
+  if (m == null) return chord;
+  final root = m.group(1)!;   // p.ej. "D", "F#", "Bb"
+  final suffix = m.group(2)!; // p.ej. "m7", "maj", ""
 
-  final match = chordRegex.firstMatch(chord);
-  if (match == null) return chord;
+  // 3) Listas cíclicas de 12 tonos (ambas formas)
+  const sharpScale = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const flatScale  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
 
-  String baseChord = match.group(1)!; // Raíz del acorde
-  String suffix = match.group(2)!; // Sufijo (m, 7, sus4, etc.)
-
-  int index = chordList.indexOf(baseChord);
+  // 4) Buscar índice en la escala correspondiente al accidental de la raíz
+  int index = sharpScale.indexOf(root);
+  bool hadSharp = true;
   if (index == -1) {
-    index = chordListFlat.indexOf(baseChord);
+    index = flatScale.indexOf(root);
+    hadSharp = false;
+  }
+  if (index == -1) return chord; // raíz no reconocida
+
+  // 5) Calcular nuevo índice con wrap-around
+  int newIndex = (index + transposeValue) % 12;
+  if (newIndex < 0) newIndex += 12;
+
+  // 6) Elegir salida: si sube semitonos, usar sharps; si baja, flats; si 0, respetar original
+  List<String> outScale;
+  if (transposeValue > 0) {
+    outScale = sharpScale;
+  } else if (transposeValue < 0) {
+    outScale = flatScale;
+  } else {
+    outScale = hadSharp ? sharpScale : flatScale;
   }
 
-  if (index == -1) return chord; // Si no se encuentra, devolver el acorde sin cambios
-
-  int newIndex = (index + transposeValue + chordList.length) % chordList.length;
-  String transposedChord = chordList[newIndex];
-
-  return transposedChord + suffix;
+  // 7) Reconstruir acorde transpuesto
+  final newRoot = outScale[newIndex];
+  return '$newRoot$suffix';
 }
+
 
 
   void transpose(int semiTones) {
@@ -249,69 +342,101 @@ String transposeChord(String chord) {
     });
   }
 
-  void toggleMetronome() {
-    setState(() {
-      isMetronomePlaying = !isMetronomePlaying;
-      if (isMetronomePlaying) {
-        startMetronome();
-        if (isMultitrackPlaying) {
-          player.resume(); 
-        }
+void toggleMetronome() {
+  setState(() {
+    isMetronomePlaying = !isMetronomePlaying;
+    if (isMetronomePlaying) {
+      startMetronome();
+      if (isMultitrackPlaying) {
+        player.resume();
+      }
+    } else {
+      stopMetronome();
+      player.pause();
+    }
+  });
+}
+
+/// Inicia el metrónomo
+void startMetronome() {
+  _metronomeRunning = true;
+  _intervalMs = (60000 / widget.cancion.tiempo).round();
+  _metronomeStart = DateTime.now();
+
+  _metronomeTimer?.cancel(); // Asegurarse de que no haya otro Timer corriendo
+  _metronomeTimer = Timer.periodic(Duration(milliseconds: _intervalMs), (timer) {
+    if (!_metronomeRunning) {
+      timer.cancel();
+      return;
+    }
+
+    // Calcular el tiempo real esperado del tick
+    DateTime expectedTickTime = _metronomeStart.add(Duration(milliseconds: timer.tick * _intervalMs));
+    Duration drift = expectedTickTime.difference(DateTime.now());
+
+    // Si hay un retraso acumulado, lo corregimos
+    if (drift.isNegative) {
+      drift = Duration.zero; // Evita que los ticks se acumulen más lento
+    }
+
+    // Reproducir el sonido del metrónomo sin retraso
+    player.play(AssetSource('sounds/metronome_tick.mp3'));
+
+    // Si el drift es alto, ajustar el siguiente tick
+    if (drift.inMilliseconds.abs() > 10) {
+      _metronomeTimer?.cancel();
+      _metronomeTimer = Timer(Duration(milliseconds: _intervalMs - drift.inMilliseconds), startMetronome);
+    }
+  });
+}
+
+void stopMetronome() {
+  _metronomeRunning = false;
+  _metronomeTimer?.cancel();
+}
+
+/// Método que mantiene el BPM exacto usando tiempo absoluto
+
+
+Future<void> playMetronomeSound() async {
+  await player.play(AssetSource('sounds/metronome_tick.mp3'));
+}
+void toggleAutoscroll() {
+  setState(() {
+    if (isAutoscrollActive) {
+      // Si está autoscrolleando y se presiona STOP:
+      stopAutoscroll();
+      scrollSpeed = 1.0; // Reinicia la velocidad a x1
+      showSpeedOptions = true;
+    } else {
+      // Si no está autoscrolleando y se presiona PLAY:
+      isAutoscrollActive = true;
+      showSpeedOptions = false;
+      startAutoscroll();
+    }
+  });
+}
+
+void startAutoscroll() {
+  _autoscrollTimer = Timer.periodic(Duration(milliseconds: 100), (timer) {
+    if (_scrollController.hasClients) {
+      double newOffset = _scrollController.offset + scrollSpeed;
+      if (newOffset < _scrollController.position.maxScrollExtent) {
+        _scrollController.jumpTo(newOffset);
       } else {
-        stopMetronome();
-        player.pause(); 
+        // Cuando se alcanza el final, se detiene el autoscroll:
+        stopAutoscroll();
       }
-    });
-  }
+    }
+  });
+}
 
-  void startMetronome() {
-    final bpm = widget.cancion.tiempo;
-    final interval = Duration(milliseconds: (60000 / bpm).round());
-    metronomeTimer = Timer.periodic(interval, (timer) {
-      playMetronomeSound();
-    });
-  }
+void stopAutoscroll() {
+  _autoscrollTimer?.cancel();
+  _autoscrollTimer = null;
+  isAutoscrollActive = false;
+}
 
-  void stopMetronome() {
-    metronomeTimer?.cancel();
-    metronomeTimer = null;
-  }
-
-  Future<void> playMetronomeSound() async {
-    await player.play(AssetSource('sounds/metronome_tick.mp3'));
-  }
-
-  void toggleAutoscroll() {
-    setState(() {
-      isAutoscrollActive = !isAutoscrollActive;
-      showSpeedOptions = !isAutoscrollActive; 
-      scrollSpeed = 1.0; 
-      if (isAutoscrollActive) {
-        startAutoscroll(); 
-      } else {
-        stopAutoscroll(); 
-      }
-    });
-  }
-
-  void startAutoscroll() {
-    _autoscrollTimer = Timer.periodic(Duration(milliseconds: 100), (timer) {
-      if (_scrollController.hasClients) {
-        double newOffset = _scrollController.offset + scrollSpeed;
-        if (newOffset < _scrollController.position.maxScrollExtent) {
-          _scrollController.jumpTo(newOffset);
-        } else {
-          stopAutoscroll(); 
-        }
-      }
-    });
-  }
-
-  void stopAutoscroll() {
-    _autoscrollTimer?.cancel();
-    _autoscrollTimer = null;
-    isAutoscrollActive = false;
-  }
 
   void setScrollSpeed(double speed) {
     setState(() {
@@ -326,6 +451,29 @@ String transposeChord(String chord) {
       }
       showSpeedOptions = false; 
     });
+  }
+
+  Widget _buildMenuItem({required IconData icon, required String title, required VoidCallback onTap}) {
+    return ListTile(
+      leading: Icon(icon, color: Colors.white),
+      title: Text(
+        title,
+        style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w500),
+      ),
+      onTap: onTap,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      tileColor: Colors.white10, // Fondo sutil para mejorar el diseño
+      contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+    );
+  }
+
+  // Método auxiliar para cambiar el instrumento actual
+  void _selectInstrument(String instrument) {
+    setState(() {
+      showInstrumentLinks = true;
+      currentInstrument = instrument;
+    });
+    Navigator.pop(context);
   }
 
   @override
@@ -371,28 +519,72 @@ String transposeChord(String chord) {
                 color: secondaryColor ?? Colors.black54,
                 child: Column(
                   children: [
+                    // Cabecera con imagen y degradado
                     Container(
                       height: 200,
-                      color: Color(0xFF1B263B),
-                      child: thumbnailUrl.isNotEmpty
-                          ? Image.network(
-                              thumbnailUrl,
-                              fit: BoxFit.cover,
-                              width: double.infinity,
-                            )
-                          : Center(
-                              child: Text(
-                                'INSTRUMENTOS',
-                                style: TextStyle(color: Colors.white, fontSize: 24),
+                      child: Stack(
+                        children: [
+                          // Imagen de fondo: usa la thumbnail si existe; de lo contrario, una imagen predeterminada de assets
+                          Positioned.fill(
+                            child: thumbnailUrl.isNotEmpty
+                                ? Image.network(
+                                    thumbnailUrl,
+                                    fit: BoxFit.cover,
+                                    width: double.infinity,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Image.asset(
+                                        'assets/image.png', // Imagen predeterminada en caso de error
+                                        fit: BoxFit.cover,
+                                        width: double.infinity,
+                                      );
+                                    },
+                                  )
+                                : Image.asset(
+                                    'assets/image.png', // Imagen predeterminada
+                                    fit: BoxFit.cover,
+                                    width: double.infinity,
+                                  ),
+                          ),
+                          // Capa de degradado para oscurecer la parte inferior
+                          Positioned.fill(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.transparent,
+                                    Colors.black.withOpacity(0.7),
+                                  ],
+                                ),
                               ),
                             ),
+                          ),
+                          // Texto "INSTRUMENTOS" cuando no hay thumbnail
+                          if (thumbnailUrl.isEmpty)
+                            Positioned.fill(
+                              child: Center(
+                                child: Text(
+                                  'INSTRUMENTOS',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
+                    // Menú de opciones con ListView
                     Expanded(
                       child: ListView(
-                        padding: EdgeInsets.zero,
+                        padding: EdgeInsets.symmetric(vertical: 10),
                         children: [
-                          ListTile(
-                            title: const Text('Página Principal', style: TextStyle(color: Colors.white)),
+                          _buildMenuItem(
+                            icon: Icons.home,
+                            title: 'Página Principal',
                             onTap: () {
                               setState(() {
                                 showInstrumentLinks = false;
@@ -401,60 +593,41 @@ String transposeChord(String chord) {
                               Navigator.pop(context);
                             },
                           ),
-                          if (widget.cancion.voicesLinks != null && widget.cancion.voicesLinks!.isNotEmpty)
-                            ListTile(
-                              title: const Text('Voces', style: TextStyle(color: Colors.white)),
-                              onTap: () {
-                                setState(() {
-                                  showInstrumentLinks = true;
-                                  currentInstrument = 'voices';
-                                });
-                                Navigator.pop(context);
-                              },
+                          Divider(color: Colors.white24),
+                          if (widget.cancion.voicesLinks != null &&
+                              widget.cancion.voicesLinks!.isNotEmpty)
+                            _buildMenuItem(
+                              icon: Icons.mic,
+                              title: 'Voces',
+                              onTap: () => _selectInstrument('voices'),
                             ),
-                          if (widget.cancion.guitarLink != null && widget.cancion.guitarLink!.isNotEmpty)
-                            ListTile(
-                              title: const Text('Guitarra', style: TextStyle(color: Colors.white)),
-                              onTap: () {
-                                setState(() {
-                                  showInstrumentLinks = true;
-                                  currentInstrument = 'guitar';
-                                });
-                                Navigator.pop(context);
-                              },
+                          if (widget.cancion.guitarLink != null &&
+                              widget.cancion.guitarLink!.isNotEmpty)
+                            _buildMenuItem(
+                              icon: Icons.music_note,
+                              title: 'Guitarra',
+                              onTap: () => _selectInstrument('guitar'),
                             ),
-                          if (widget.cancion.pianoLink != null && widget.cancion.pianoLink!.isNotEmpty)
-                            ListTile(
-                              title: const Text('Piano', style: TextStyle(color: Colors.white)),
-                              onTap: () {
-                                setState(() {
-                                  showInstrumentLinks = true;
-                                  currentInstrument = 'piano';
-                                });
-                                Navigator.pop(context);
-                              },
+                          if (widget.cancion.pianoLink != null &&
+                              widget.cancion.pianoLink!.isNotEmpty)
+                            _buildMenuItem(
+                              icon: Icons.piano,
+                              title: 'Piano',
+                              onTap: () => _selectInstrument('piano'),
                             ),
-                          if (widget.cancion.bassLink != null && widget.cancion.bassLink!.isNotEmpty)
-                            ListTile(
-                              title: const Text('Bajo', style: TextStyle(color: Colors.white)),
-                              onTap: () {
-                                setState(() {
-                                  showInstrumentLinks = true;
-                                  currentInstrument = 'bass';
-                                });
-                                Navigator.pop(context);
-                              },
+                          if (widget.cancion.bassLink != null &&
+                              widget.cancion.bassLink!.isNotEmpty)
+                            _buildMenuItem(
+                              icon: Icons.audiotrack,
+                              title: 'Bajo',
+                              onTap: () => _selectInstrument('bass'),
                             ),
-                          if (widget.cancion.drumsLink != null && widget.cancion.drumsLink!.isNotEmpty)
-                            ListTile(
-                              title: const Text('Batería', style: TextStyle(color: Colors.white)),
-                              onTap: () {
-                                setState(() {
-                                  showInstrumentLinks = true;
-                                  currentInstrument = 'drums';
-                                });
-                                Navigator.pop(context);
-                              },
+                          if (widget.cancion.drumsLink != null &&
+                              widget.cancion.drumsLink!.isNotEmpty)
+                            _buildMenuItem(
+                              icon: FontAwesomeIcons.drum,
+                              title: 'Batería',
+                              onTap: () => _selectInstrument('drums'),
                             ),
                         ],
                       ),
@@ -476,13 +649,26 @@ String transposeChord(String chord) {
                           automaticallyImplyLeading: false,
                           leading: Container(),
                           flexibleSpace: FlexibleSpaceBar(
-                            background: Image.network(
-                              thumbnailUrl,
-                              fit: BoxFit.cover,
-                              width: double.infinity,
-                            ),
-                          ),
+                            background: thumbnailUrl.isNotEmpty
+                              ? Image.network(
+                                  thumbnailUrl,
+                                  fit: BoxFit.cover,
+                                  width: double.infinity,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Image.asset(
+                                      'assets/image.png',
+                                      fit: BoxFit.cover,
+                                      width: double.infinity,
+                                    );
+                                  },
+                                )
+                              : Image.asset(
+                                  'assets/image.png',
+                                  fit: BoxFit.cover,
+                                  width: double.infinity,
+                                ),
                         ),
+                      ),
                         SliverList(
                           delegate: SliverChildListDelegate(
                             [
@@ -590,14 +776,59 @@ String transposeChord(String chord) {
                       controller: _scrollController,
                       slivers: [
                         if (thumbnailUrl.isNotEmpty)
-                          SliverToBoxAdapter(
-                            child: Image.network(
-                              thumbnailUrl,
-                              fit: BoxFit.cover,
-                              height: 200.0,
-                              width: double.infinity,
-                            ),
+                       SliverToBoxAdapter(
+  child: Container(
+    color: Color.fromARGB(255, 255, 255, 255), // Fondo con el color hexadecimal #d5d6d1
+    child: Stack(
+      children: [
+        Image.network(
+          thumbnailUrl,
+          fit: BoxFit.cover, 
+          height: 200.0, // Mantén la altura fija
+          width: double.infinity, // Esto hace que la imagen ocupe todo el ancho disponible
+          errorBuilder: (context, error, stackTrace) {
+            return Image.asset(
+              'assets/icono.png', // Imagen predeterminada en caso de error
+              fit: BoxFit.contain, // Asegura que la imagen se ajuste dentro del espacio sin deformarse
+              height: 200.0,
+              width: double.infinity,
+            );
+          },
+        ),
+        // Degradado negro desde abajo
+        Positioned.fill(
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              height: 80.0, // Ajusta la altura del degradado
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withOpacity(0.5), // Negro con algo de opacidad
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  ),
+)
+
+
+                      else
+                        SliverToBoxAdapter(
+                          child: Image.asset(
+                            'assets/image.png',
+                            fit: BoxFit.cover,
+                            height: 200.0,
+                            width: double.infinity,
                           ),
+                        ),
                         SliverList(
                           delegate: SliverChildBuilderDelegate(
                             (BuildContext context, int index) {
@@ -613,7 +844,7 @@ String transposeChord(String chord) {
                                           });
                                         },
                                         style: ElevatedButton.styleFrom(
-                                          backgroundColor: secondaryColor ?? Colors.grey,
+                                          backgroundColor: accentColor  ?? Colors.grey,
                                           foregroundColor: Colors.white,
                                         ),
                                         child: Text(
@@ -749,20 +980,48 @@ String transposeChord(String chord) {
                                     ),
                                     const SizedBox(height: 20),
                                     if (widget.cancion.youtubeLink != null && widget.cancion.youtubeLink != "null")
-                                      Container(
-                                        margin: const EdgeInsets.symmetric(vertical: 10),
-                                        child: YoutubePlayer(
-                                          controller: YoutubePlayerController(
-                                            initialVideoId: YoutubePlayer.convertUrlToId(widget.cancion.youtubeLink!)!,
-                                            flags: const YoutubePlayerFlags(
-                                              autoPlay: false,
-                                              mute: false,
-                                            ),
-                                          ),
-                                          showVideoProgressIndicator: true,
-                                        ),
-                                      ),
-                                    const SizedBox(height: 20),
+  Container(
+    margin: const EdgeInsets.symmetric(vertical: 10),
+    child: GestureDetector(
+      onDoubleTap: () {
+        _youtubeController.seekTo(
+          _youtubeController.value.position + Duration(seconds: 10),
+        );
+      },
+      onLongPress: () {
+        _youtubeController.setPlaybackRate(2.0); // Aumenta velocidad a x2
+      },
+      onLongPressEnd: (_) {
+        _youtubeController.setPlaybackRate(1.0); // Vuelve a velocidad normal
+      },
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          YoutubePlayer(
+            controller: _youtubeController,
+            showVideoProgressIndicator: true,
+          ),
+          ValueListenableBuilder(
+            valueListenable: _youtubeController,
+            builder: (context, YoutubePlayerValue value, child) {
+              if (!value.isPlaying) {
+                return IconButton(
+                  icon: Icon(Icons.play_arrow, size: 64, color: Colors.white),
+                  onPressed: () {
+                    _youtubeController.play();
+                  },
+                );
+              } else {
+                return const SizedBox.shrink();
+              }
+            },
+          ),
+        ],
+      ),
+    ),
+  ),
+const SizedBox(height: 20),
+
                                   ],
                                 ),
                               );
