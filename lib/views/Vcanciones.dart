@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class Vcanciones extends StatefulWidget {
   final Song cancion;
@@ -18,6 +19,9 @@ class Vcanciones extends StatefulWidget {
 }
 
 class _VcancionesState extends State<Vcanciones> {
+  // Sube este número para invalidar TODOS los colores cacheados de golpe.
+  static const int _colorCacheVersion = 1;
+
   late Future<String> _thumbnailFuture;
   bool isMetronomePlaying = false;
   int transposeValue = 0;
@@ -25,14 +29,21 @@ class _VcancionesState extends State<Vcanciones> {
   bool showTransposeButtons = false;
   final AudioPlayer player = AudioPlayer();
   bool isMultitrackPlaying = false;
-  bool isMultitrackVisible = false; 
+  bool isMultitrackVisible = false;
   bool isAutoscrollActive = false;
   bool showSpeedOptions = false;
-  double scrollSpeed = 1.0; 
+  double scrollSpeed = 1.0;
 
+  late YoutubePlayerController _multitrackController;
+  late YoutubePlayerController _youtubeController;
 
-  late YoutubePlayerController _multitrackController; 
-  late YoutubePlayerController _youtubeController; 
+  // ====== Manejo de errores de reproducción ======
+  // Marca si el controlador principal / multitrack quedó en estado de error
+  // (video borrado, privado, bloqueado por región, etc.). Se actualiza vía
+  // listener porque YoutubePlayer no lanza excepciones Dart normales para
+  // estos casos: expone value.hasError / value.errorCode.
+  bool _youtubeHasError = false;
+  bool _multitrackHasError = false;
 
   final ScrollController _scrollController = ScrollController();
   Timer? _autoscrollTimer;
@@ -41,59 +52,57 @@ class _VcancionesState extends State<Vcanciones> {
   Color? secondaryColor;
   Color? accentColor;
 
-  bool showInstrumentLinks = false; 
-  String? currentInstrument; 
+  bool showInstrumentLinks = false;
+  String? currentInstrument;
   String? videoId;
-  bool _isContentVisible = false; // Estado para controlar la visibilidad del contenido
-bool _metronomeRunning = false;
-int _intervalMs = 0;
-late DateTime _metronomeStart;
-Timer? _metronomeTimer;
+  bool _isContentVisible = false;
+  bool _metronomeRunning = false;
+  int _intervalMs = 0;
+  late DateTime _metronomeStart;
+  Timer? _metronomeTimer;
+
   @override
-void initState() {
-  super.initState();
-  _initializeYoutubeControllers();
-  _thumbnailFuture = _getThumbnailUrl();
-  _extractColorsFromImage();
+  void initState() {
+    super.initState();
+    _initializeYoutubeControllers();
+    _thumbnailFuture = _getThumbnailUrl();
+    _extractColorsFromImage();
 
-  // Simula carga de 2 segundos para mostrar el contenido
-  Future.delayed(Duration(seconds: 2), () {
-    setState(() {
-      _isContentVisible = true;
-    });
-  });
-  
-  // Precargar el sonido para minimizar la latencia
-  // Asegúrate de que el asset esté declarado en pubspec.yaml
-  player.setSource(AssetSource('sounds/metronome_tick.mp3'));
-}
-
-Future<String> _getThumbnailUrl() async {
-  final String extractedId = _safeExtractVideoId(widget.cancion.youtubeLink);
-  if (extractedId.isNotEmpty) {
-    videoId = extractedId;
-    final String maxresUrl = 'https://img.youtube.com/vi/$videoId/maxresdefault.jpg';
-    final String fallbackUrl = 'https://img.youtube.com/vi/$videoId/0.jpg';
-
-    try {
-      final response = await http.get(Uri.parse(maxresUrl));
-      if (response.statusCode == 200) {
-        return maxresUrl; // Devuelve la miniatura si existe
-      } else {
-        return fallbackUrl; // Si no existe, devuelve el primer fotograma
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        setState(() {
+          _isContentVisible = true;
+        });
       }
-    } catch (e) {
-      // Manejo de errores: devuelve la imagen predeterminada en caso de error
-      print('Error al obtener la miniatura: $e'); // Imprime el error en la consola
-    }
+    });
+
+    player.setSource(AssetSource('sounds/metronome_tick.mp3'));
   }
-  return 'assets/image.png'; // Si no hay enlace, retorna la imagen predeterminada
-}
+
+  Future<String> _getThumbnailUrl() async {
+    final String extractedId = _safeExtractVideoId(widget.cancion.youtubeLink);
+    if (extractedId.isNotEmpty) {
+      videoId = extractedId;
+      final String maxresUrl = 'https://img.youtube.com/vi/$videoId/maxresdefault.jpg';
+      final String fallbackUrl = 'https://img.youtube.com/vi/$videoId/0.jpg';
+
+      try {
+        final response = await http.get(Uri.parse(maxresUrl));
+        if (response.statusCode == 200) {
+          return maxresUrl;
+        } else {
+          return fallbackUrl;
+        }
+      } catch (e) {
+        print('Error al obtener la miniatura: $e');
+      }
+    }
+    return 'assets/image.png';
+  }
 
   /// Extrae el ID de video de un link de YouTube de forma segura.
-  /// Antes se usaba `convertUrlToId(...)!` con force-unwrap: si el link tenía
-  /// un formato inválido (typo, link roto, etc.), convertUrlToId devolvía null
-  /// y el "!" hacía crashear la app. Ahora simplemente devuelve '' en ese caso.
+  /// Devuelve '' si el link es nulo, vacío, "null", o si convertUrlToId
+  /// no puede parsearlo — así se evita el crash del force-unwrap ('!').
   String _safeExtractVideoId(String? link) {
     if (link == null || link.isEmpty || link == "null") return '';
     try {
@@ -110,54 +119,110 @@ Future<String> _getThumbnailUrl() async {
         autoPlay: false,
         mute: false,
       ),
+    )..addListener(_onMultitrackValueChanged);
+
+    _youtubeController = YoutubePlayerController(
+      initialVideoId: _safeExtractVideoId(widget.cancion.youtubeLink),
+      flags: const YoutubePlayerFlags(
+        autoPlay: false,
+        mute: false,
+      ),
+    )..addListener(_onYoutubeValueChanged);
+  }
+
+  void _onYoutubeValueChanged() {
+    final bool hasError = _youtubeController.value.hasError;
+    if (hasError != _youtubeHasError) {
+      setState(() {
+        _youtubeHasError = hasError;
+      });
+    }
+  }
+
+  void _onMultitrackValueChanged() {
+    final bool hasError = _multitrackController.value.hasError;
+    if (hasError != _multitrackHasError) {
+      setState(() {
+        _multitrackHasError = hasError;
+      });
+    }
+  }
+
+  Future<void> _openInYoutubeApp(String? link) async {
+    if (link == null || link.isEmpty || link == "null") return;
+    final Uri? uri = Uri.tryParse(link);
+    if (uri == null) return;
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo abrir el enlace de YouTube.')),
+        );
+      }
+    }
+  }
+
+  /// Widget de reemplazo cuando un video no está disponible: link vacío/roto
+  /// (nunca tuvo un ID válido) o hasError=true (existía pero YouTube lo
+  /// rechaza: borrado, privado, bloqueado por región, etc.).
+  Widget _buildVideoErrorFallback({
+    required String message,
+    required String? originalLink,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.grey[200],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.videocam_off, size: 40, color: Colors.grey),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.black87, fontSize: 14),
+          ),
+          if (originalLink != null && originalLink.isNotEmpty && originalLink != "null") ...[
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: () => _openInYoutubeApp(originalLink),
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('Abrir en YouTube'),
+            ),
+          ],
+        ],
+      ),
     );
-
-   _youtubeController = YoutubePlayerController(
-  initialVideoId: _safeExtractVideoId(widget.cancion.youtubeLink),
-  flags: const YoutubePlayerFlags(
-    autoPlay: false,
-    mute: false,
-  ),
-);
-
-// Widget que contiene el reproductor con gestos
-GestureDetector(
-  onDoubleTap: () {
-    _youtubeController.seekTo(_youtubeController.value.position + Duration(seconds: 10));
-  },
-  onLongPress: () {
-    _youtubeController.setPlaybackRate(2.0); // Aumentar velocidad a x2
-  },
-  onLongPressEnd: (_) {
-    _youtubeController.setPlaybackRate(1.0); // Volver a velocidad normal
-  },
-  child: YoutubePlayer(
-    controller: _youtubeController,
-    showVideoProgressIndicator: true,
-  ),
-);
-
   }
 
   Future<void> _extractColorsFromImage() async {
     String thumbnailUrl = await _thumbnailFuture;
 
     if (thumbnailUrl.isNotEmpty) {
-      // Clave de caché: por videoId si existe, si no por título (fallback estable).
-      final String cacheKey = 'song_colors_${videoId ?? widget.cancion.title}';
+      final String cacheKey =
+          'song_colors_v${_colorCacheVersion}_${videoId ?? widget.cancion.title}';
       final prefs = await SharedPreferences.getInstance();
       final String? cached = prefs.getString(cacheKey);
 
       if (cached != null) {
-        // Ya calculamos los colores de esta canción antes: reusarlos sin
-        // volver a descargar la miniatura ni recalcular la paleta.
         final parts = cached.split(',');
         if (parts.length == 3) {
-          primaryColor = Color(int.parse(parts[0]));
-          secondaryColor = Color(int.parse(parts[1]));
-          accentColor = Color(int.parse(parts[2]));
-          setState(() {});
-          return;
+          final int? p = int.tryParse(parts[0]);
+          final int? s = int.tryParse(parts[1]);
+          final int? a = int.tryParse(parts[2]);
+          if (p != null && s != null && a != null) {
+            primaryColor = Color(p);
+            secondaryColor = Color(s);
+            accentColor = Color(a);
+            if (mounted) setState(() {});
+            return;
+          } else {
+            await prefs.remove(cacheKey);
+          }
         }
       }
 
@@ -172,34 +237,30 @@ GestureDetector(
         secondaryColor = _getContrastingColor(lighten(dominantColor, 0.2));
         accentColor = _getContrastingColor(darken(dominantColor, 0.2));
 
-        // Guardar en caché para no repetir este trabajo la próxima vez.
         await prefs.setString(
           cacheKey,
           '${primaryColor!.value},${secondaryColor!.value},${accentColor!.value}',
         );
       } catch (e) {
-        primaryColor = Color.fromARGB(255, 0, 0, 0);  // Negro profundo
-        secondaryColor = Color.fromARGB(255, 161, 119, 69);  // Dorado oscuro
-        accentColor = Color.fromARGB(255, 96, 139, 151);  // Azul grisáceo
+        primaryColor = const Color.fromARGB(255, 0, 0, 0);
+        secondaryColor = const Color.fromARGB(255, 161, 119, 69);
+        accentColor = const Color.fromARGB(255, 96, 139, 151);
       }
     } else {
-      primaryColor = Color.fromARGB(255, 0, 0, 0);  // Negro profundo
-      secondaryColor = Color.fromARGB(255, 161, 119, 69);  // Dorado oscuro
-      accentColor = Color.fromARGB(255, 96, 139, 151);  // Azul grisáceo
+      primaryColor = const Color.fromARGB(255, 0, 0, 0);
+      secondaryColor = const Color.fromARGB(255, 161, 119, 69);
+      accentColor = const Color.fromARGB(255, 96, 139, 151);
     }
 
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   Color _getContrastingColor(Color color) {
-    // Calcular la luminancia
     double luminance = (0.299 * color.red + 0.587 * color.green + 0.114 * color.blue) / 255;
-
-    // Si la luminancia es alta, oscurecer el color
     if (luminance > 0.7) {
-      return darken(color, 0.3); // Oscurecer el color
+      return darken(color, 0.3);
     }
-    return color; // Retornar el color original si ya es suficientemente oscuro
+    return color;
   }
 
   Color lighten(Color color, [double amount = 0.1]) {
@@ -223,164 +284,164 @@ GestureDetector(
   }
 
   @override
-void dispose() {
-  stopMetronome();
-  stopAutoscroll();
-  player.dispose();
-  _multitrackController.dispose();
-  _youtubeController.dispose();
-  _scrollController.dispose();
-  super.dispose();
-}
-
-List<TextSpan> parseLyrics(String text) {
-  // Unidad base de un acorde individual: raíz + sufijo + dígitos + bajo opcional.
-  // '-' se sacó de los sufijos (era ambiguo) porque en tus canciones el guion
-  // se usa para UNIR varios acordes pegados sin espacio (ej. "G-A", "F#m-Bm"),
-  // no como notación de acorde menor.
-  final String _suffix =
-      r'(?:maj7|maj|min|dim7|dim|aug|sus\d*|add\d*|m7|m9|m6|m|[°+])?';
-  final String _chordUnit =
-      r'[A-G][#b]?' + _suffix + r'\d*' + r'(?:\/[A-G][#b]?' + _suffix + r'\d*)?';
-
-  // 1) Regex de acordes: uno o más "_chordUnit" unidos por guiones sin espacio
-  //    (ej. "G-A", "D2-A2-G/Em-A-A/G-F#m-Bm"), rodeado de inicio/fin o espacio.
-  final chordRegex = RegExp(
-    r'(?<=^|\s)' +
-    '(?:$_chordUnit)' +
-    '(?:-(?:$_chordUnit))*' +
-    r'(?=$|\s)'
-  );
-
-  // 1b) Versión "anclada" (^...$) para decidir si una LÍNEA COMPLETA es una
-  // línea de acordes o una línea de letra normal. Antes el chordRegex se
-  // aplicaba token por token sobre cualquier línea, así que una palabra suelta
-  // en mayúscula dentro de la letra (ej. una "A" o "E" que sea preposición,
-  // no acorde) se pintaba y transponía como si fuera un acorde real.
-  final chordOnlyLineToken = RegExp(
-    '^(?:(?:$_chordUnit)(?:-(?:$_chordUnit))*|[/|.x]+|-)\$'
-  );
-
-  bool _looksLikeChordLine(String line) {
-    final trimmed = line.trim();
-    if (trimmed.isEmpty) return false;
-    final tokens = trimmed.split(RegExp(r'\s+'));
-    // Es línea de acordes solo si TODOS los tokens no vacíos parecen acordes
-    // (o separadores de repetición como "//", "x4", "-" suelto), nunca si hay
-    // alguna palabra de letra normal mezclada.
-    return tokens.every((t) => chordOnlyLineToken.hasMatch(t));
+  void dispose() {
+    stopMetronome();
+    stopAutoscroll();
+    player.dispose();
+    _youtubeController.removeListener(_onYoutubeValueChanged);
+    _multitrackController.removeListener(_onMultitrackValueChanged);
+    _multitrackController.dispose();
+    _youtubeController.dispose();
+    _scrollController.dispose();
+    super.dispose();
   }
 
-  // 2) Regex de keywords (igual que antes)
-  final keywordRegex = RegExp(
-  r'\b(?:CANCIÓN|TONALIDAD|TIEMPO|INTRO|VERSO(?: \d+)?|PRE-CORO|CORO 1 Y 2|CORO(?: \d+)?|INSTRUMENTAL|FINAL|ESTROFA|SOLO|PUENTE(?: \d+)?|BAJO|SALIDA(?: \d+)?)\b');
+  List<TextSpan> parseLyrics(String text) {
+    // Unidad base de un acorde individual: raíz + sufijo + dígitos + bajo(s) opcional(es).
+    final String _suffix =
+        r'(?:maj7|maj|min|dim7|dim|aug|sus\d*|add\d*|m7|m9|m6|m|[°+])?';
+    // Bajo tras la barra: ahora soporta 0, 1 o VARIAS barras seguidas
+    // (ej. "C/E/G"), no solo una. Antes con "(?:...)?" solo se permitía una
+    // barra; con "(?:...)*" se permiten encadenadas.
+    final String _bassPart =
+        r'(?:\/[A-G][#b]?' + _suffix + r'\d*)*';
+    final String _chordUnit =
+        r'[A-G][#b]?' + _suffix + r'\d*' + _bassPart;
 
-  List<TextSpan> spans = [];
+    // Regex de acordes: uno o más "_chordUnit" unidos por guiones sin espacio
+    // (ej. "G-A", "D2-A2-G/Em-A-A/G-F#m-Bm"), rodeado de inicio/fin, espacio,
+    // o "/" (para casos como "// Dm Bb F C//", donde el último acorde queda
+    // pegado sin espacio al separador de repetición "//").
+    // IMPORTANTE: se detecta el acorde DONDE APAREZCA en la línea, sin exigir
+    // que toda la línea "parezca" de acordes. Se intentó esa restricción antes,
+    // pero las intros usan demasiados símbolos distintos como separadores
+    // ("...", "....", "//", "////", "x4", "(x4)", "*PIANO*", "(notas del coro)",
+    // etc.) y era imposible listarlos todos: cualquier símbolo no contemplado
+    // rompía la línea COMPLETA de acordes. Es más robusto reconocer acordes
+    // donde aparezcan y simplemente ignorar todo lo que no matchee el patrón.
+    final chordRegex = RegExp(
+      r'(?:(?<=^)|(?<=\s))' +
+      '(?:$_chordUnit)' +
+      '(?:-(?:$_chordUnit))*' +
+      r'(?:(?=$)|(?=[\s/]))'
+    );
 
-  for (var line in text.split('\n')) {
-    final bool isChordLine = _looksLikeChordLine(line);
+    // Regex de keywords (marcadores de sección)
+    final keywordRegex = RegExp(
+    r'\b(?:CANCIÓN|TONALIDAD|TIEMPO|INTRO|VERSO(?: \d+)?|PRE-CORO|CORO 1 Y 2|CORO(?: \d+)?|INSTRUMENTAL|FINAL|ESTROFA|SOLO|PUENTE(?: \d+)?|BAJO|SALIDA(?: \d+)?)\b');
 
-    final matches = <RegExpMatch>[
-      ...keywordRegex.allMatches(line),
-      if (isChordLine) ...chordRegex.allMatches(line),
-    ]..sort((a, b) => a.start.compareTo(b.start));
+    // Nota: se evaluó proteger la cabecera (CANCIÓN/TONALIDAD/TIEMPO/artista) de
+    // la detección de acordes, pero el formato real de las canciones NO es
+    // consistente: algunas tienen una línea en blanco después de la cabecera y
+    // otras no (ej. "PERDÓN" no la tiene), así que esa protección terminaba
+    // ocultando acordes reales del INTRO/primer verso en esas canciones. Se
+    // comprobó que los límites estrictos del chordRegex (debe estar rodeado de
+    // espacio/inicio/fin/"/") ya evitan por sí solos que palabras como
+    // "Marcos", "Brunet" o "Barrientos" se confundan con acordes.
 
-    int currentIndex = 0;
-    for (var match in matches) {
-      if (match.start > currentIndex) {
+    List<TextSpan> spans = [];
+
+    for (var line in text.split('\n')) {
+      final matches = <RegExpMatch>[
+        ...keywordRegex.allMatches(line),
+        ...chordRegex.allMatches(line),
+      ]..sort((a, b) => a.start.compareTo(b.start));
+
+      int currentIndex = 0;
+      for (var match in matches) {
+        if (match.start > currentIndex) {
+          spans.add(TextSpan(
+            text: line.substring(currentIndex, match.start),
+            style: const TextStyle(color: Colors.black),
+          ));
+        }
+
+        final token = match.group(0)!;
+        TextStyle style;
+        String rendered;
+
+        if (chordRegex.hasMatch(token)) {
+          rendered = transposeChord(token);
+          style = TextStyle(
+            color: secondaryColor ?? const Color(0xFF4A90E2),
+            fontWeight: FontWeight.bold,
+          );
+        } else {
+          rendered = token;
+          style = TextStyle(
+            color: accentColor ?? const Color(0xFF4A90E2),
+            fontWeight: FontWeight.bold,
+          );
+        }
+
+        spans.add(TextSpan(text: rendered, style: style));
+        currentIndex = match.end;
+      }
+
+      if (currentIndex < line.length) {
         spans.add(TextSpan(
-          text: line.substring(currentIndex, match.start),
-          style: TextStyle(color: Colors.black),
+          text: line.substring(currentIndex),
+          style: const TextStyle(color: Colors.black),
         ));
       }
-
-      final token = match.group(0)!;
-      TextStyle style;
-      String rendered;
-
-      if (isChordLine && chordRegex.hasMatch(token)) {
-        rendered = transposeChord(token);
-        style = TextStyle(
-          color: secondaryColor ?? Color(0xFF4A90E2),
-          fontWeight: FontWeight.bold,
-        );
-      } else {
-        rendered = token;
-        style = TextStyle(
-          color: accentColor ?? Color(0xFF4A90E2),
-          fontWeight: FontWeight.bold,
-        );
-      }
-
-      spans.add(TextSpan(text: rendered, style: style));
-      currentIndex = match.end;
+      spans.add(const TextSpan(text: '\n'));
     }
 
-    if (currentIndex < line.length) {
-      spans.add(TextSpan(
-        text: line.substring(currentIndex),
-        style: TextStyle(color: Colors.black),
-      ));
+    return spans;
+  }
+
+  String transposeChord(String chord) {
+    // 0) Soportar cadenas de acordes pegados con guion sin espacio (ej. "G-A",
+    //    "D2-A2-G/Em-A-A/G-F#m-Bm"): transponer cada uno por separado.
+    if (chord.contains('-')) {
+      return chord.split('-').map(transposeChord).join('-');
     }
-    spans.add(TextSpan(text: '\n'));
+
+    // 1) Soportar bajos invertidos, incluyendo MÚLTIPLES barras (ej. "C/E",
+    //    "C/E/G"). Antes solo se tomaban parts[0] y parts[1] y cualquier bajo
+    //    extra tras una segunda barra se perdía silenciosamente al transponer.
+    //    Ahora se transponen todas las partes, sin importar cuántas haya.
+    if (chord.contains('/')) {
+      return chord.split('/').map(transposeChord).join('/');
+    }
+
+    // 2) Separar raíz y sufijo
+    final m = RegExp(r'^([A-G][#b]?)(.*)$').firstMatch(chord);
+    if (m == null) return chord;
+    final root = m.group(1)!;   // p.ej. "D", "F#", "Bb"
+    final suffix = m.group(2)!; // p.ej. "m7", "maj", "sus4", "add9", ""
+
+    // 3) Listas cíclicas de 12 tonos (ambas formas)
+    const sharpScale = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    const flatScale  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+
+    // 4) Buscar índice en la escala correspondiente al accidental de la raíz
+    int index = sharpScale.indexOf(root);
+    bool hadSharp = true;
+    if (index == -1) {
+      index = flatScale.indexOf(root);
+      hadSharp = false;
+    }
+    if (index == -1) return chord; // raíz no reconocida
+
+    // 5) Calcular nuevo índice con wrap-around
+    int newIndex = (index + transposeValue) % 12;
+    if (newIndex < 0) newIndex += 12;
+
+    // 6) Elegir salida: si sube semitonos, usar sharps; si baja, flats; si 0, respetar original
+    List<String> outScale;
+    if (transposeValue > 0) {
+      outScale = sharpScale;
+    } else if (transposeValue < 0) {
+      outScale = flatScale;
+    } else {
+      outScale = hadSharp ? sharpScale : flatScale;
+    }
+
+    // 7) Reconstruir acorde transpuesto
+    final newRoot = outScale[newIndex];
+    return '$newRoot$suffix';
   }
-
-  return spans;
-}
-
-
-String transposeChord(String chord) {
-  // 0) Soportar cadenas de acordes pegados con guion sin espacio (ej. "G-A",
-  //    "D2-A2-G/Em-A-A/G-F#m-Bm"): transponer cada uno por separado.
-  if (chord.contains('-')) {
-    return chord.split('-').map(transposeChord).join('-');
-  }
-
-  // 1) Soportar bajos invertidos (e.g. G/Bb)
-  if (chord.contains('/')) {
-    final parts = chord.split('/');
-    return '${transposeChord(parts[0])}/${transposeChord(parts[1])}';
-  }
-
-  // 2) Separar raíz y sufijo
-  final m = RegExp(r'^([A-G][#b]?)(.*)$').firstMatch(chord);
-  if (m == null) return chord;
-  final root = m.group(1)!;   // p.ej. "D", "F#", "Bb"
-  final suffix = m.group(2)!; // p.ej. "m7", "maj", ""
-
-  // 3) Listas cíclicas de 12 tonos (ambas formas)
-  const sharpScale = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-  const flatScale  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
-
-  // 4) Buscar índice en la escala correspondiente al accidental de la raíz
-  int index = sharpScale.indexOf(root);
-  bool hadSharp = true;
-  if (index == -1) {
-    index = flatScale.indexOf(root);
-    hadSharp = false;
-  }
-  if (index == -1) return chord; // raíz no reconocida
-
-  // 5) Calcular nuevo índice con wrap-around
-  int newIndex = (index + transposeValue) % 12;
-  if (newIndex < 0) newIndex += 12;
-
-  // 6) Elegir salida: si sube semitonos, usar sharps; si baja, flats; si 0, respetar original
-  List<String> outScale;
-  if (transposeValue > 0) {
-    outScale = sharpScale;
-  } else if (transposeValue < 0) {
-    outScale = flatScale;
-  } else {
-    outScale = hadSharp ? sharpScale : flatScale;
-  }
-
-  // 7) Reconstruir acorde transpuesto
-  final newRoot = outScale[newIndex];
-  return '$newRoot$suffix';
-}
-
-
 
   void transpose(int semiTones) {
     setState(() {
@@ -400,126 +461,115 @@ String transposeChord(String chord) {
     });
   }
 
-void toggleMetronome() {
-  if (widget.cancion.tiempo <= 0) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Esta canción no tiene un tiempo (BPM) configurado, no se puede usar el metrónomo.'),
-      ),
-    );
-    return;
-  }
-  setState(() {
-    isMetronomePlaying = !isMetronomePlaying;
-    if (isMetronomePlaying) {
-      startMetronome();
-      if (isMultitrackPlaying) {
-        player.resume();
-      }
-    } else {
-      stopMetronome();
-      player.pause();
-    }
-  });
-}
-
-/// Inicia el metrónomo
-void startMetronome() {
-  if (widget.cancion.tiempo <= 0) {
-    _metronomeRunning = false;
-    return; // Evita división por cero (Infinity.round() crashea la app)
-  }
-  _metronomeRunning = true;
-  _intervalMs = (60000 / widget.cancion.tiempo).round();
-  _metronomeStart = DateTime.now();
-
-  _metronomeTimer?.cancel(); // Asegurarse de que no haya otro Timer corriendo
-  _metronomeTimer = Timer.periodic(Duration(milliseconds: _intervalMs), (timer) {
-    if (!_metronomeRunning) {
-      timer.cancel();
+  void toggleMetronome() {
+    if (widget.cancion.tiempo <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Esta canción no tiene un tiempo (BPM) configurado, no se puede usar el metrónomo.'),
+        ),
+      );
       return;
     }
-
-    // Calcular el tiempo real esperado del tick
-    DateTime expectedTickTime = _metronomeStart.add(Duration(milliseconds: timer.tick * _intervalMs));
-    Duration drift = expectedTickTime.difference(DateTime.now());
-
-    // Si hay un retraso acumulado, lo corregimos
-    if (drift.isNegative) {
-      drift = Duration.zero; // Evita que los ticks se acumulen más lento
-    }
-
-    // Reproducir el sonido del metrónomo sin retraso
-    player.play(AssetSource('sounds/metronome_tick.mp3'));
-
-    // Si el drift es alto, ajustar el siguiente tick
-    if (drift.inMilliseconds.abs() > 10) {
-      _metronomeTimer?.cancel();
-      _metronomeTimer = Timer(Duration(milliseconds: _intervalMs - drift.inMilliseconds), startMetronome);
-    }
-  });
-}
-
-void stopMetronome() {
-  _metronomeRunning = false;
-  _metronomeTimer?.cancel();
-}
-
-/// Método que mantiene el BPM exacto usando tiempo absoluto
-
-
-Future<void> playMetronomeSound() async {
-  await player.play(AssetSource('sounds/metronome_tick.mp3'));
-}
-void toggleAutoscroll() {
-  setState(() {
-    if (isAutoscrollActive) {
-      // Si está autoscrolleando y se presiona STOP:
-      stopAutoscroll();
-      scrollSpeed = 1.0; // Reinicia la velocidad a x1
-      showSpeedOptions = true;
-    } else {
-      // Si no está autoscrolleando y se presiona PLAY:
-      isAutoscrollActive = true;
-      showSpeedOptions = false;
-      startAutoscroll();
-    }
-  });
-}
-
-void startAutoscroll() {
-  _autoscrollTimer = Timer.periodic(Duration(milliseconds: 100), (timer) {
-    if (_scrollController.hasClients) {
-      double newOffset = _scrollController.offset + scrollSpeed;
-      if (newOffset < _scrollController.position.maxScrollExtent) {
-        _scrollController.jumpTo(newOffset);
+    setState(() {
+      isMetronomePlaying = !isMetronomePlaying;
+      if (isMetronomePlaying) {
+        startMetronome();
+        if (isMultitrackPlaying) {
+          player.resume();
+        }
       } else {
-        // Cuando se alcanza el final, se detiene el autoscroll:
-        stopAutoscroll();
+        stopMetronome();
+        player.pause();
       }
+    });
+  }
+
+  void startMetronome() {
+    if (widget.cancion.tiempo <= 0) {
+      _metronomeRunning = false;
+      return;
     }
-  });
-}
+    _metronomeRunning = true;
+    _intervalMs = (60000 / widget.cancion.tiempo).round();
+    _metronomeStart = DateTime.now();
 
-void stopAutoscroll() {
-  _autoscrollTimer?.cancel();
-  _autoscrollTimer = null;
-  isAutoscrollActive = false;
-}
+    _metronomeTimer?.cancel();
+    _metronomeTimer = Timer.periodic(Duration(milliseconds: _intervalMs), (timer) {
+      if (!_metronomeRunning) {
+        timer.cancel();
+        return;
+      }
 
+      DateTime expectedTickTime = _metronomeStart.add(Duration(milliseconds: timer.tick * _intervalMs));
+      Duration drift = expectedTickTime.difference(DateTime.now());
+
+      if (drift.isNegative) {
+        drift = Duration.zero;
+      }
+
+      player.play(AssetSource('sounds/metronome_tick.mp3'));
+
+      if (drift.inMilliseconds.abs() > 10) {
+        _metronomeTimer?.cancel();
+        _metronomeTimer = Timer(Duration(milliseconds: _intervalMs - drift.inMilliseconds), startMetronome);
+      }
+    });
+  }
+
+  void stopMetronome() {
+    _metronomeRunning = false;
+    _metronomeTimer?.cancel();
+  }
+
+  Future<void> playMetronomeSound() async {
+    await player.play(AssetSource('sounds/metronome_tick.mp3'));
+  }
+
+  void toggleAutoscroll() {
+    setState(() {
+      if (isAutoscrollActive) {
+        stopAutoscroll();
+        scrollSpeed = 1.0;
+        showSpeedOptions = true;
+      } else {
+        isAutoscrollActive = true;
+        showSpeedOptions = false;
+        startAutoscroll();
+      }
+    });
+  }
+
+  void startAutoscroll() {
+    _autoscrollTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (_scrollController.hasClients) {
+        double newOffset = _scrollController.offset + scrollSpeed;
+        if (newOffset < _scrollController.position.maxScrollExtent) {
+          _scrollController.jumpTo(newOffset);
+        } else {
+          stopAutoscroll();
+        }
+      }
+    });
+  }
+
+  void stopAutoscroll() {
+    _autoscrollTimer?.cancel();
+    _autoscrollTimer = null;
+    isAutoscrollActive = false;
+  }
 
   void setScrollSpeed(double speed) {
     setState(() {
       scrollSpeed = speed;
       if (speed == 0) {
-        stopAutoscroll(); 
+        stopAutoscroll();
       } else {
         if (!isAutoscrollActive) {
-          isAutoscrollActive = true; 
-          startAutoscroll(); 
+          isAutoscrollActive = true;
+          startAutoscroll();
         }
       }
-      showSpeedOptions = false; 
+      showSpeedOptions = false;
     });
   }
 
@@ -528,16 +578,15 @@ void stopAutoscroll() {
       leading: Icon(icon, color: Colors.white),
       title: Text(
         title,
-        style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w500),
+        style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w500),
       ),
       onTap: onTap,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      tileColor: Colors.white10, // Fondo sutil para mejorar el diseño
-      contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+      tileColor: Colors.white10,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
     );
   }
 
-  // Método auxiliar para cambiar el instrumento actual
   void _selectInstrument(String instrument) {
     setState(() {
       showInstrumentLinks = true;
@@ -546,18 +595,32 @@ void stopAutoscroll() {
     Navigator.pop(context);
   }
 
+  /// Reemplaza el patrón `convertUrlToId(link)!` (force-unwrap inseguro) por
+  /// una versión que, si el link es inválido, muestra el fallback en vez de
+  /// crashear la app.
+  Widget _buildInstrumentPlayer(String link) {
+    final String id = _safeExtractVideoId(link);
+    if (id.isEmpty) {
+      return _buildVideoErrorFallback(
+        message: 'Este enlace de instrumento no es válido o está roto.',
+        originalLink: link,
+      );
+    }
+    return _InstrumentYoutubePlayer(videoId: id, originalLink: link);
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<String>(
-      future: _thumbnailFuture, // Usa la variable _thumbnailFuture ya inicializada
+      future: _thumbnailFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Scaffold(
+          return const Scaffold(
             backgroundColor: Colors.white,
-            body: Center(child: CircularProgressIndicator()), // Puedes cambiar esto si deseas
+            body: Center(child: CircularProgressIndicator()),
           );
         } else if (snapshot.hasError) {
-          return Center(child: Text('Error al cargar la imagen'));
+          return const Center(child: Text('Error al cargar la imagen'));
         } else {
           String thumbnailUrl = snapshot.data ?? '';
 
@@ -566,7 +629,7 @@ void stopAutoscroll() {
             appBar: AppBar(
               title: Text(
                 widget.cancion.title,
-                style: TextStyle(fontSize: 20),
+                style: const TextStyle(fontSize: 20),
               ),
               backgroundColor: primaryColor ?? const Color(0xFF1B263B),
               foregroundColor: Colors.white,
@@ -575,7 +638,7 @@ void stopAutoscroll() {
                   Builder(
                     builder: (BuildContext context) {
                       return IconButton(
-                        icon: Icon(Icons.menu, color: Colors.black),
+                        icon: const Icon(Icons.menu, color: Colors.black),
                         onPressed: () {
                           Scaffold.of(context).openEndDrawer();
                         },
@@ -589,12 +652,10 @@ void stopAutoscroll() {
                 color: secondaryColor ?? Colors.black54,
                 child: Column(
                   children: [
-                    // Cabecera con imagen y degradado
-                    Container(
+                    SizedBox(
                       height: 200,
                       child: Stack(
                         children: [
-                          // Imagen de fondo: usa la thumbnail si existe; de lo contrario, una imagen predeterminada de assets
                           Positioned.fill(
                             child: thumbnailUrl.isNotEmpty
                                 ? Image.network(
@@ -603,19 +664,18 @@ void stopAutoscroll() {
                                     width: double.infinity,
                                     errorBuilder: (context, error, stackTrace) {
                                       return Image.asset(
-                                        'assets/image.png', // Imagen predeterminada en caso de error
+                                        'assets/image.png',
                                         fit: BoxFit.cover,
                                         width: double.infinity,
                                       );
                                     },
                                   )
                                 : Image.asset(
-                                    'assets/image.png', // Imagen predeterminada
+                                    'assets/image.png',
                                     fit: BoxFit.cover,
                                     width: double.infinity,
                                   ),
                           ),
-                          // Capa de degradado para oscurecer la parte inferior
                           Positioned.fill(
                             child: Container(
                               decoration: BoxDecoration(
@@ -630,9 +690,8 @@ void stopAutoscroll() {
                               ),
                             ),
                           ),
-                          // Texto "INSTRUMENTOS" cuando no hay thumbnail
                           if (thumbnailUrl.isEmpty)
-                            Positioned.fill(
+                            const Positioned.fill(
                               child: Center(
                                 child: Text(
                                   'INSTRUMENTOS',
@@ -647,10 +706,9 @@ void stopAutoscroll() {
                         ],
                       ),
                     ),
-                    // Menú de opciones con ListView
                     Expanded(
                       child: ListView(
-                        padding: EdgeInsets.symmetric(vertical: 10),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                         children: [
                           _buildMenuItem(
                             icon: Icons.home,
@@ -663,7 +721,7 @@ void stopAutoscroll() {
                               Navigator.pop(context);
                             },
                           ),
-                          Divider(color: Colors.white24),
+                          const Divider(color: Colors.white24),
                           if (widget.cancion.voicesLinks != null &&
                               widget.cancion.voicesLinks!.isNotEmpty)
                             _buildMenuItem(
@@ -708,7 +766,7 @@ void stopAutoscroll() {
             ),
             body: AnimatedOpacity(
               opacity: _isContentVisible ? 1.0 : 0.0,
-              duration: Duration(seconds: 1), // Duración de la transición
+              duration: const Duration(seconds: 1),
               child: showInstrumentLinks
                   ? CustomScrollView(
                       key: ValueKey(currentInstrument),
@@ -720,123 +778,53 @@ void stopAutoscroll() {
                           leading: Container(),
                           flexibleSpace: FlexibleSpaceBar(
                             background: thumbnailUrl.isNotEmpty
-                              ? Image.network(
-                                  thumbnailUrl,
-                                  fit: BoxFit.cover,
-                                  width: double.infinity,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return Image.asset(
-                                      'assets/image.png',
-                                      fit: BoxFit.cover,
-                                      width: double.infinity,
-                                    );
-                                  },
-                                )
-                              : Image.asset(
-                                  'assets/image.png',
-                                  fit: BoxFit.cover,
-                                  width: double.infinity,
-                                ),
+                                ? Image.network(
+                                    thumbnailUrl,
+                                    fit: BoxFit.cover,
+                                    width: double.infinity,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Image.asset(
+                                        'assets/image.png',
+                                        fit: BoxFit.cover,
+                                        width: double.infinity,
+                                      );
+                                    },
+                                  )
+                                : Image.asset(
+                                    'assets/image.png',
+                                    fit: BoxFit.cover,
+                                    width: double.infinity,
+                                  ),
+                          ),
                         ),
-                      ),
                         SliverList(
                           delegate: SliverChildListDelegate(
                             [
                               if (currentInstrument == 'voices' && widget.cancion.voicesLinks != null)
-                                ...widget.cancion.voicesLinks!.map((voiceLink) {
-                                  String? voiceVideoId = YoutubePlayer.convertUrlToId(voiceLink);
-                                  return Container(
-                                    margin: const EdgeInsets.all(8.0),
-                                    child: Column(
-                                      children: [
-                                        YoutubePlayer(
-                                          controller: YoutubePlayerController(
-                                            initialVideoId: voiceVideoId!,
-                                            flags: const YoutubePlayerFlags(autoPlay: false, mute: false),
-                                          ),
-                                          showVideoProgressIndicator: true,
-                                        ),
-                                        const SizedBox(height: 8),
-                                      ],
-                                    ),
-                                  );
-                                }).toList(),
+                                ...widget.cancion.voicesLinks!.map((link) => Container(
+                                      margin: const EdgeInsets.all(8.0),
+                                      child: _buildInstrumentPlayer(link),
+                                    )),
                               if (currentInstrument == 'guitar' && widget.cancion.guitarLink != null)
-                                ...widget.cancion.guitarLink!.map((guitarLink) {
-                                  String? guitarVideoId = YoutubePlayer.convertUrlToId(guitarLink);
-                                  return Container(
-                                    margin: const EdgeInsets.all(8.0),
-                                    child: Column(
-                                      children: [
-                                        YoutubePlayer(
-                                          controller: YoutubePlayerController(
-                                            initialVideoId: guitarVideoId!,
-                                            flags: const YoutubePlayerFlags(autoPlay: false, mute: false),
-                                          ),
-                                          showVideoProgressIndicator: true,
-                                        ),
-                                        const SizedBox(height: 8),
-                                      ],
-                                    ),
-                                  );
-                                }).toList(),
+                                ...widget.cancion.guitarLink!.map((link) => Container(
+                                      margin: const EdgeInsets.all(8.0),
+                                      child: _buildInstrumentPlayer(link),
+                                    )),
                               if (currentInstrument == 'piano' && widget.cancion.pianoLink != null)
-                                ...widget.cancion.pianoLink!.map((pianoLink) {
-                                  String? pianoVideoId = YoutubePlayer.convertUrlToId(pianoLink);
-                                  return Container(
-                                    margin: const EdgeInsets.all(8.0),
-                                    child: Column(
-                                      children: [
-                                        YoutubePlayer(
-                                          controller: YoutubePlayerController(
-                                            initialVideoId: pianoVideoId!,
-                                            flags: const YoutubePlayerFlags(autoPlay: false, mute: false),
-                                          ),
-                                          showVideoProgressIndicator: true,
-                                        ),
-                                        const SizedBox(height: 8),
-                                      ],
-                                    ),
-                                  );
-                                }).toList(),
+                                ...widget.cancion.pianoLink!.map((link) => Container(
+                                      margin: const EdgeInsets.all(8.0),
+                                      child: _buildInstrumentPlayer(link),
+                                    )),
                               if (currentInstrument == 'bass' && widget.cancion.bassLink != null)
-                                ...widget.cancion.bassLink!.map((bassLink) {
-                                  String? bassVideoId = YoutubePlayer.convertUrlToId(bassLink);
-                                  return Container(
-                                    margin: const EdgeInsets.all(8.0),
-                                    child: Column(
-                                      children: [
-                                        YoutubePlayer(
-                                          controller: YoutubePlayerController(
-                                            initialVideoId: bassVideoId!,
-                                            flags: const YoutubePlayerFlags(autoPlay: false, mute: false),
-                                          ),
-                                          showVideoProgressIndicator: true,
-                                        ),
-                                        const SizedBox(height: 8),
-                                      ],
-                                    ),
-                                  );
-                                }).toList(),
+                                ...widget.cancion.bassLink!.map((link) => Container(
+                                      margin: const EdgeInsets.all(8.0),
+                                      child: _buildInstrumentPlayer(link),
+                                    )),
                               if (currentInstrument == 'drums' && widget.cancion.drumsLink != null)
-                                ...widget.cancion.drumsLink!.map((drumsLink) {
-                                  String? drumsVideoId = YoutubePlayer.convertUrlToId(drumsLink);
-                                  return Container(
-                                    margin: const EdgeInsets.all(8.0),
-                                    child: Column(
-                                      children: [
-                                        YoutubePlayer(
-                                          controller: YoutubePlayerController(
-                                            initialVideoId: drumsVideoId!,
-                                            flags: const YoutubePlayerFlags(autoPlay: false, mute: false),
-                                          ),
-                                          showVideoProgressIndicator: true,
-                                        ),
-                                        const SizedBox(height: 8),
-                                      ],
-                                    ),
-                                  );
-                                }).toList(),
+                                ...widget.cancion.drumsLink!.map((link) => Container(
+                                      margin: const EdgeInsets.all(8.0),
+                                      child: _buildInstrumentPlayer(link),
+                                    )),
                             ],
                           ),
                         ),
@@ -846,59 +834,56 @@ void stopAutoscroll() {
                       controller: _scrollController,
                       slivers: [
                         if (thumbnailUrl.isNotEmpty)
-                       SliverToBoxAdapter(
-  child: Container(
-    color: Color.fromARGB(255, 255, 255, 255), // Fondo con el color hexadecimal #d5d6d1
-    child: Stack(
-      children: [
-        Image.network(
-          thumbnailUrl,
-          fit: BoxFit.cover, 
-          height: 200.0, // Mantén la altura fija
-          width: double.infinity, // Esto hace que la imagen ocupe todo el ancho disponible
-          errorBuilder: (context, error, stackTrace) {
-            return Image.asset(
-              'assets/icono.png', // Imagen predeterminada en caso de error
-              fit: BoxFit.contain, // Asegura que la imagen se ajuste dentro del espacio sin deformarse
-              height: 200.0,
-              width: double.infinity,
-            );
-          },
-        ),
-        // Degradado negro desde abajo
-        Positioned.fill(
-          child: Align(
-            alignment: Alignment.bottomCenter,
-            child: Container(
-              height: 80.0, // Ajusta la altura del degradado
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    Colors.black.withOpacity(0.5), // Negro con algo de opacidad
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    ),
-  ),
-)
-
-
-                      else
-                        SliverToBoxAdapter(
-                          child: Image.asset(
-                            'assets/image.png',
-                            fit: BoxFit.cover,
-                            height: 200.0,
-                            width: double.infinity,
+                          SliverToBoxAdapter(
+                            child: Container(
+                              color: const Color.fromARGB(255, 255, 255, 255),
+                              child: Stack(
+                                children: [
+                                  Image.network(
+                                    thumbnailUrl,
+                                    fit: BoxFit.cover,
+                                    height: 200.0,
+                                    width: double.infinity,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Image.asset(
+                                        'assets/icono.png',
+                                        fit: BoxFit.contain,
+                                        height: 200.0,
+                                        width: double.infinity,
+                                      );
+                                    },
+                                  ),
+                                  Positioned.fill(
+                                    child: Align(
+                                      alignment: Alignment.bottomCenter,
+                                      child: Container(
+                                        height: 80.0,
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                            colors: [
+                                              Colors.transparent,
+                                              Colors.black.withOpacity(0.5),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        else
+                          SliverToBoxAdapter(
+                            child: Image.asset(
+                              'assets/image.png',
+                              fit: BoxFit.cover,
+                              height: 200.0,
+                              width: double.infinity,
+                            ),
                           ),
-                        ),
                         SliverList(
                           delegate: SliverChildBuilderDelegate(
                             (BuildContext context, int index) {
@@ -906,7 +891,8 @@ void stopAutoscroll() {
                                 padding: const EdgeInsets.all(12.0),
                                 child: Column(
                                   children: [
-                                    if (widget.cancion.multitrackLink != null && widget.cancion.multitrackLink!.isNotEmpty)
+                                    if (widget.cancion.multitrackLink != null &&
+                                        widget.cancion.multitrackLink!.isNotEmpty)
                                       ElevatedButton(
                                         onPressed: () {
                                           setState(() {
@@ -914,99 +900,119 @@ void stopAutoscroll() {
                                           });
                                         },
                                         style: ElevatedButton.styleFrom(
-                                          backgroundColor: accentColor  ?? Colors.grey,
+                                          backgroundColor: accentColor ?? Colors.grey,
                                           foregroundColor: Colors.white,
                                         ),
                                         child: Text(
                                           isMultitrackVisible ? "OCULTAR" : "MULTITRACK",
-                                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                                         ),
                                       ),
                                     const SizedBox(height: 10),
                                     if (isMultitrackVisible)
-                                      Column(
-                                        children: [
-                                          YoutubePlayerBuilder(
-                                            player: YoutubePlayer(
-                                              controller: _multitrackController,
-                                              showVideoProgressIndicator: false,
-                                            ),
-                                            builder: (context, player) {
-                                              return Column(
-                                                children: [
-                                                  Opacity(
-                                                    opacity: 0.0,
-                                                    child: SizedBox(height: 1, child: player),
-                                                  ),
-                                                  ValueListenableBuilder(
-                                                    valueListenable: _multitrackController,
-                                                    builder: (context, YoutubePlayerValue value, child) {
-                                                      bool isReady = value.isReady; 
-                                                      return Column(
-                                                        children: [
-                                                          Slider(
-                                                            value: value.position.inSeconds.toDouble(),
-                                                            min: 0,
-                                                            max: value.metaData.duration.inSeconds.toDouble(),
-                                                            onChanged: isReady ? (newValue) {
-                                                              _multitrackController.seekTo(
-                                                                Duration(seconds: newValue.toInt()),
-                                                              );
-                                                            } : null,
-                                                          ),
-                                                          Row(
-                                                            mainAxisAlignment: MainAxisAlignment.center,
-                                                            children: [
-                                                              IconButton(
-                                                                icon: Icon(isMultitrackPlaying ? Icons.pause : Icons.play_arrow),
-                                                                onPressed: isReady ? () {
-                                                                  setState(() {
-                                                                    isMultitrackPlaying = !isMultitrackPlaying;
-                                                                    if (isMultitrackPlaying) {
-                                                                      _multitrackController.play();
-                                                                    } else {
-                                                                      _multitrackController.pause();
-                                                                    }
-                                                                  });
-                                                                } : null,
-                                                              ),
-                                                              IconButton(
-                                                                icon: Icon(Icons.replay_10),
-                                                                onPressed: isReady ? () {
-                                                                  final currentPosition = _multitrackController.value.position;
-                                                                  final newPosition = currentPosition - Duration(seconds: 10);
-                                                                  _multitrackController.seekTo(newPosition);
-                                                                } : null,
-                                                              ),
-                                                              IconButton(
-                                                                icon: Icon(Icons.forward_10),
-                                                                onPressed: isReady ? () {
-                                                                  final currentPosition = _multitrackController.value.position;
-                                                                  final newPosition = currentPosition + Duration(seconds: 10);
-                                                                  _multitrackController.seekTo(newPosition);
-                                                                } : null,
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ],
-                                                      );
-                                                    },
-                                                  ),
-                                                ],
-                                              );
-                                            },
-                                          ),
-                                        ],
-                                      ),
+                                      _multitrackController.initialVideoId.isEmpty
+                                          ? _buildVideoErrorFallback(
+                                              message: 'El enlace del multitrack no es válido.',
+                                              originalLink: widget.cancion.multitrackLink,
+                                            )
+                                          : _multitrackHasError
+                                              ? _buildVideoErrorFallback(
+                                                  message: 'El video del multitrack ya no está disponible (puede haber sido eliminado o ser privado).',
+                                                  originalLink: widget.cancion.multitrackLink,
+                                                )
+                                              : Column(
+                                                  children: [
+                                                    YoutubePlayerBuilder(
+                                                      player: YoutubePlayer(
+                                                        controller: _multitrackController,
+                                                        showVideoProgressIndicator: false,
+                                                      ),
+                                                      builder: (context, player) {
+                                                        return Column(
+                                                          children: [
+                                                            Opacity(
+                                                              opacity: 0.0,
+                                                              child: SizedBox(height: 1, child: player),
+                                                            ),
+                                                            ValueListenableBuilder(
+                                                              valueListenable: _multitrackController,
+                                                              builder: (context, YoutubePlayerValue value, child) {
+                                                                bool isReady = value.isReady;
+                                                                return Column(
+                                                                  children: [
+                                                                    Slider(
+                                                                      value: value.position.inSeconds.toDouble(),
+                                                                      min: 0,
+                                                                      max: value.metaData.duration.inSeconds.toDouble() > 0
+                                                                          ? value.metaData.duration.inSeconds.toDouble()
+                                                                          : 1,
+                                                                      onChanged: isReady
+                                                                          ? (newValue) {
+                                                                              _multitrackController.seekTo(
+                                                                                Duration(seconds: newValue.toInt()),
+                                                                              );
+                                                                            }
+                                                                          : null,
+                                                                    ),
+                                                                    Row(
+                                                                      mainAxisAlignment: MainAxisAlignment.center,
+                                                                      children: [
+                                                                        IconButton(
+                                                                          icon: Icon(isMultitrackPlaying ? Icons.pause : Icons.play_arrow),
+                                                                          onPressed: isReady
+                                                                              ? () {
+                                                                                  setState(() {
+                                                                                    isMultitrackPlaying = !isMultitrackPlaying;
+                                                                                    if (isMultitrackPlaying) {
+                                                                                      _multitrackController.play();
+                                                                                    } else {
+                                                                                      _multitrackController.pause();
+                                                                                    }
+                                                                                  });
+                                                                                }
+                                                                              : null,
+                                                                        ),
+                                                                        IconButton(
+                                                                          icon: const Icon(Icons.replay_10),
+                                                                          onPressed: isReady
+                                                                              ? () {
+                                                                                  final currentPosition = _multitrackController.value.position;
+                                                                                  final newPosition = currentPosition - const Duration(seconds: 10);
+                                                                                  _multitrackController.seekTo(newPosition);
+                                                                                }
+                                                                              : null,
+                                                                        ),
+                                                                        IconButton(
+                                                                          icon: const Icon(Icons.forward_10),
+                                                                          onPressed: isReady
+                                                                              ? () {
+                                                                                  final currentPosition = _multitrackController.value.position;
+                                                                                  final newPosition = currentPosition + const Duration(seconds: 10);
+                                                                                  _multitrackController.seekTo(newPosition);
+                                                                                }
+                                                                              : null,
+                                                                        ),
+                                                                      ],
+                                                                    ),
+                                                                  ],
+                                                                );
+                                                              },
+                                                            ),
+                                                          ],
+                                                        );
+                                                      },
+                                                    ),
+                                                  ],
+                                                ),
                                     const SizedBox(height: 10),
                                     Row(
                                       children: [
                                         IconButton(
-                                          icon: Icon(Icons.music_note),
+                                          icon: const Icon(Icons.music_note),
                                           onPressed: toggleTransposeButtons,
                                           padding: EdgeInsets.zero,
                                         ),
-                                        SizedBox(width: 5),
+                                        const SizedBox(width: 5),
                                         AnimatedOpacity(
                                           opacity: showTransposeButtons ? 1.0 : 0.0,
                                           duration: const Duration(milliseconds: 250),
@@ -1021,7 +1027,7 @@ void stopAutoscroll() {
                                             ],
                                           ),
                                         ),
-                                        SizedBox(width: 5),
+                                        const SizedBox(width: 5),
                                         IconButton(
                                           icon: Icon(isMetronomePlaying ? Icons.pause : Icons.play_arrow),
                                           onPressed: toggleMetronome,
@@ -1050,49 +1056,59 @@ void stopAutoscroll() {
                                       ),
                                     ),
                                     const SizedBox(height: 20),
-                                    if (widget.cancion.youtubeLink != null && widget.cancion.youtubeLink != "null")
-  Container(
-    margin: const EdgeInsets.symmetric(vertical: 10),
-    child: GestureDetector(
-      onDoubleTap: () {
-        _youtubeController.seekTo(
-          _youtubeController.value.position + Duration(seconds: 10),
-        );
-      },
-      onLongPress: () {
-        _youtubeController.setPlaybackRate(2.0); // Aumenta velocidad a x2
-      },
-      onLongPressEnd: (_) {
-        _youtubeController.setPlaybackRate(1.0); // Vuelve a velocidad normal
-      },
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          YoutubePlayer(
-            controller: _youtubeController,
-            showVideoProgressIndicator: true,
-          ),
-          ValueListenableBuilder(
-            valueListenable: _youtubeController,
-            builder: (context, YoutubePlayerValue value, child) {
-              if (!value.isPlaying) {
-                return IconButton(
-                  icon: Icon(Icons.play_arrow, size: 64, color: Colors.white),
-                  onPressed: () {
-                    _youtubeController.play();
-                  },
-                );
-              } else {
-                return const SizedBox.shrink();
-              }
-            },
-          ),
-        ],
-      ),
-    ),
-  ),
-const SizedBox(height: 20),
-
+                                    if (widget.cancion.youtubeLink != null &&
+                                        widget.cancion.youtubeLink != "null" &&
+                                        widget.cancion.youtubeLink!.isNotEmpty)
+                                      Container(
+                                        margin: const EdgeInsets.symmetric(vertical: 10),
+                                        child: _youtubeController.initialVideoId.isEmpty
+                                            ? _buildVideoErrorFallback(
+                                                message: 'Este enlace de YouTube no es válido o está roto.',
+                                                originalLink: widget.cancion.youtubeLink,
+                                              )
+                                            : _youtubeHasError
+                                                ? _buildVideoErrorFallback(
+                                                    message: 'Este video ya no está disponible (puede haber sido eliminado, ser privado o estar bloqueado en tu región).',
+                                                    originalLink: widget.cancion.youtubeLink,
+                                                  )
+                                                : GestureDetector(
+                                                    onDoubleTap: () {
+                                                      _youtubeController.seekTo(
+                                                        _youtubeController.value.position + const Duration(seconds: 10),
+                                                      );
+                                                    },
+                                                    onLongPress: () {
+                                                      _youtubeController.setPlaybackRate(2.0);
+                                                    },
+                                                    onLongPressEnd: (_) {
+                                                      _youtubeController.setPlaybackRate(1.0);
+                                                    },
+                                                    child: Stack(
+                                                      alignment: Alignment.center,
+                                                      children: [
+                                                        YoutubePlayer(
+                                                          controller: _youtubeController,
+                                                          showVideoProgressIndicator: true,
+                                                        ),
+                                                        ValueListenableBuilder(
+                                                          valueListenable: _youtubeController,
+                                                          builder: (context, YoutubePlayerValue value, child) {
+                                                            if (!value.isPlaying && !value.hasError) {
+                                                              return IconButton(
+                                                                icon: const Icon(Icons.play_arrow, size: 64, color: Colors.white),
+                                                                onPressed: () {
+                                                                  _youtubeController.play();
+                                                                },
+                                                              );
+                                                            }
+                                                            return const SizedBox.shrink();
+                                                          },
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                      ),
+                                    const SizedBox(height: 20),
                                   ],
                                 ),
                               );
@@ -1106,13 +1122,13 @@ const SizedBox(height: 20),
             floatingActionButton: FloatingActionButton(
               onPressed: toggleAutoscroll,
               child: Icon(isAutoscrollActive ? Icons.pause : Icons.play_arrow),
-              backgroundColor: isAutoscrollActive ? secondaryColor ?? Color.fromARGB(255, 50, 86, 151) : Colors.white,
+              backgroundColor: isAutoscrollActive ? secondaryColor ?? const Color.fromARGB(255, 50, 86, 151) : Colors.white,
             ),
           );
         }
       },
     );
-  }  
+  }
 
   Widget _buildSpeedButton(String text, double speed) {
     return Padding(
@@ -1123,7 +1139,7 @@ const SizedBox(height: 20),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
           decoration: BoxDecoration(
-            color: scrollSpeed == speed ? secondaryColor ?? Color.fromARGB(255, 42, 69, 118) : Colors.grey,
+            color: scrollSpeed == speed ? secondaryColor ?? const Color.fromARGB(255, 42, 69, 118) : Colors.grey,
             borderRadius: BorderRadius.circular(80),
           ),
           child: Text(
@@ -1159,6 +1175,107 @@ const SizedBox(height: 20),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Reproductor aislado para cada link de instrumento (voces/guitarra/piano/
+/// bajo/batería). Cada uno crea y gestiona su propio YoutubePlayerController
+/// y escucha value.hasError para mostrar el fallback si el video se cayó,
+/// en vez de dejar el player roto sin explicación.
+class _InstrumentYoutubePlayer extends StatefulWidget {
+  final String videoId;
+  final String originalLink;
+
+  const _InstrumentYoutubePlayer({
+    required this.videoId,
+    required this.originalLink,
+  });
+
+  @override
+  State<_InstrumentYoutubePlayer> createState() => _InstrumentYoutubePlayerState();
+}
+
+class _InstrumentYoutubePlayerState extends State<_InstrumentYoutubePlayer> {
+  late YoutubePlayerController _controller;
+  bool _hasError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = YoutubePlayerController(
+      initialVideoId: widget.videoId,
+      flags: const YoutubePlayerFlags(autoPlay: false, mute: false),
+    )..addListener(_onValueChanged);
+  }
+
+  void _onValueChanged() {
+    final bool hasError = _controller.value.hasError;
+    if (hasError != _hasError && mounted) {
+      setState(() {
+        _hasError = hasError;
+      });
+    }
+  }
+
+  Future<void> _openInYoutubeApp() async {
+    final Uri? uri = Uri.tryParse(widget.originalLink);
+    if (uri == null) return;
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo abrir el enlace de YouTube.')),
+        );
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_onValueChanged);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_hasError) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+        decoration: BoxDecoration(
+          color: Colors.grey[200],
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          children: [
+            const Icon(Icons.videocam_off, size: 40, color: Colors.grey),
+            const SizedBox(height: 8),
+            const Text(
+              'Este video ya no está disponible.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.black87, fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: _openInYoutubeApp,
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('Abrir en YouTube'),
+            ),
+          ],
+        ),
+      );
+    }
+    return Column(
+      children: [
+        YoutubePlayer(
+          controller: _controller,
+          showVideoProgressIndicator: true,
+        ),
+        const SizedBox(height: 8),
+      ],
     );
   }
 }
