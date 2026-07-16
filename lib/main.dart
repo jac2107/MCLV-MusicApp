@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:diacritic/diacritic.dart' as diacritic_pkg;
 
 // Variable global para evitar duplicados
 String? lastHandledNotificationId;
@@ -770,14 +771,14 @@ class _AdoracionesPageState extends State<AdoracionesPage> {
   }
 
   void _filterSongs(String query) {
-    String normalizedQuery = removeDiacritics(query.toLowerCase());
+    String normalizedQuery = diacritic_pkg.removeDiacritics(query.toLowerCase());
     List<Song> tempSongs = cancionesSimplificadas;
     if (normalizedQuery.isNotEmpty) {
       tempSongs = tempSongs.where((song) {
         String normalizedTitle =
-            removeDiacritics(song.title.toLowerCase());
+            diacritic_pkg.removeDiacritics(song.title.toLowerCase());
         String normalizedText =
-            removeDiacritics(song.text.toLowerCase());
+            diacritic_pkg.removeDiacritics(song.text.toLowerCase());
         return normalizedTitle.contains(normalizedQuery) ||
             normalizedText.contains(normalizedQuery);
       }).toList();
@@ -790,10 +791,6 @@ class _AdoracionesPageState extends State<AdoracionesPage> {
     setState(() {
       _filteredSongs = tempSongs;
     });
-  }
-
-  String removeDiacritics(String str) {
-    return str;
   }
 
   void _clearTonalidad() {
@@ -1668,12 +1665,12 @@ class AlabanzasPageState extends State<AlabanzasPage> {
   }
 
   void _filterSongs(String query) {
-    String normalizedQuery = query.toLowerCase();
+    String normalizedQuery = diacritic_pkg.removeDiacritics(query.toLowerCase());
     List<Song> tempSongs = cancionesSimplificadas1;
     if (normalizedQuery.isNotEmpty) {
       tempSongs = tempSongs.where((song) {
-        String normalizedTitle = song.title.toLowerCase();
-        String normalizedText = song.text.toLowerCase();
+        String normalizedTitle = diacritic_pkg.removeDiacritics(song.title.toLowerCase());
+        String normalizedText = diacritic_pkg.removeDiacritics(song.text.toLowerCase());
         return normalizedTitle.contains(normalizedQuery) ||
             normalizedText.contains(normalizedQuery);
       }).toList();

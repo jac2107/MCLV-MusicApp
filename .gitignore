@@ -41,3 +41,21 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Android native build (generado automáticamente, no debe subirse)
+android/app/.cxx/
+android/app/build/
+android/build/
+android/.gradle/
+
+# iOS/macOS build
+ios/Pods/
+ios/Flutter/Flutter.podspec
+**/Pods/
+
+# Variables de entorno / claves (NUNCA subir esto)
+.env
+*.env
+
+# Archivos de sistema
+Thumbs.db
