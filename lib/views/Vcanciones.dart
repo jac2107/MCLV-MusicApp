@@ -4,10 +4,13 @@ import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:palette_generator/palette_generator.dart';
 import '../models/Mcanciones.dart';
 import 'dart:async';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class Vcanciones extends StatefulWidget {
   final Song cancion;
@@ -22,6 +25,12 @@ class _VcancionesState extends State<Vcanciones> {
   // Sube este número para invalidar TODOS los colores cacheados de golpe.
   static const int _colorCacheVersion = 1;
 
+  // Máximo de miniaturas guardadas en disco (LRU: se borra la más antigua
+  // al superar este límite). Cubre bien el repertorio típico que se repite
+  // semana a semana sin dejar crecer el almacenamiento indefinidamente.
+  static const int _maxCachedThumbnails = 40;
+  static const String _thumbnailOrderKey = 'thumbnail_cache_order';
+
   late Future<String> _thumbnailFuture;
   bool isMetronomePlaying = false;
   int transposeValue = 0;
@@ -34,16 +43,18 @@ class _VcancionesState extends State<Vcanciones> {
   bool showSpeedOptions = false;
   double scrollSpeed = 1.0;
 
-  late YoutubePlayerController _multitrackController;
-  late YoutubePlayerController _youtubeController;
+  YoutubePlayerController? _multitrackController;
+  YoutubePlayerController? _youtubeController;
 
-  // ====== Manejo de errores de reproducción ======
-  // Marca si el controlador principal / multitrack quedó en estado de error
-  // (video borrado, privado, bloqueado por región, etc.). Se actualiza vía
-  // listener porque YoutubePlayer no lanza excepciones Dart normales para
-  // estos casos: expone value.hasError / value.errorCode.
   bool _youtubeHasError = false;
   bool _multitrackHasError = false;
+
+  // ====== Estado de conectividad ======
+  // null = todavía no se verificó; true/false = resultado de la última
+  // verificación. Se usa para decidir si vale la pena intentar instanciar
+  // los reproductores de YouTube en absoluto, en vez de dejarlos "cargando"
+  // indefinidamente sin internet.
+  bool? _hasConnection;
 
   final ScrollController _scrollController = ScrollController();
   Timer? _autoscrollTimer;
@@ -64,9 +75,7 @@ class _VcancionesState extends State<Vcanciones> {
   @override
   void initState() {
     super.initState();
-    _initializeYoutubeControllers();
-    _thumbnailFuture = _getThumbnailUrl();
-    _extractColorsFromImage();
+    _checkConnectionAndInit();
 
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
@@ -79,30 +88,162 @@ class _VcancionesState extends State<Vcanciones> {
     player.setSource(AssetSource('sounds/metronome_tick.mp3'));
   }
 
-  Future<String> _getThumbnailUrl() async {
-    final String extractedId = _safeExtractVideoId(widget.cancion.youtubeLink);
-    if (extractedId.isNotEmpty) {
-      videoId = extractedId;
-      final String maxresUrl = 'https://img.youtube.com/vi/$videoId/maxresdefault.jpg';
-      final String fallbackUrl = 'https://img.youtube.com/vi/$videoId/0.jpg';
+  Future<void> _checkConnectionAndInit() async {
+    final bool hasConnection = await _checkConnection();
+    if (!mounted) return;
+    setState(() {
+      _hasConnection = hasConnection;
+    });
 
+    // La miniatura se intenta cargar siempre: si está cacheada en disco de
+    // una visita anterior, se muestra igual aunque no haya internet ahora.
+    _thumbnailFuture = _getThumbnailUrl();
+    _extractColorsFromImage();
+
+    // Los reproductores de YouTube solo se instancian si hay conexión.
+    // Sin esto, YoutubePlayerController intenta cargar igual y se queda
+    // "esperando" sin avisar nada al usuario.
+    if (hasConnection) {
+      _initializeYoutubeControllers();
+    }
+  }
+
+  Future<bool> _checkConnection() async {
+    try {
+      final List<ConnectivityResult> results = await Connectivity().checkConnectivity();
+      return results.any((r) => r != ConnectivityResult.none);
+    } catch (e) {
+      // Si el chequeo falla por algún motivo, asumimos que sí hay conexión
+      // y dejamos que el propio player/http fallen con su manejo de error
+      // normal, en vez de bloquear al usuario por un falso negativo.
+      return true;
+    }
+  }
+
+  Future<void> _retryConnection() async {
+    final bool hasConnection = await _checkConnection();
+    if (!mounted) return;
+    setState(() {
+      _hasConnection = hasConnection;
+    });
+    if (hasConnection && _youtubeController == null) {
+      _initializeYoutubeControllers();
+      setState(() {});
+    }
+  }
+
+  /// Carpeta local donde se guardan los archivos de miniaturas cacheadas.
+  Future<Directory> _thumbnailCacheDir() async {
+    final Directory base = await getApplicationDocumentsDirectory();
+    final Directory dir = Directory('${base.path}/thumbnail_cache');
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
+
+  String _thumbnailCacheKey() => 'thumb_${videoId ?? widget.cancion.title}';
+
+  /// Registra el uso de una miniatura en el orden LRU y borra la más
+  /// antigua si se supera el límite de _maxCachedThumbnails.
+  Future<void> _touchThumbnailLru(String key) async {
+    final prefs = await SharedPreferences.getInstance();
+    List<String> order = prefs.getStringList(_thumbnailOrderKey) ?? [];
+
+    order.remove(key);
+    order.add(key); // más reciente al final
+
+    if (order.length > _maxCachedThumbnails) {
+      final String oldestKey = order.removeAt(0);
       try {
-        final response = await http.get(Uri.parse(maxresUrl));
-        if (response.statusCode == 200) {
-          return maxresUrl;
-        } else {
-          return fallbackUrl;
+        final Directory dir = await _thumbnailCacheDir();
+        final File oldFile = File('${dir.path}/$oldestKey.jpg');
+        if (await oldFile.exists()) {
+          await oldFile.delete();
         }
       } catch (e) {
-        print('Error al obtener la miniatura: $e');
+        // Si falla el borrado no es crítico, simplemente queda un archivo
+        // huérfano; no interrumpimos el flujo por esto.
       }
     }
+
+    await prefs.setStringList(_thumbnailOrderKey, order);
+  }
+
+  Future<String> _getThumbnailUrl() async {
+    final String extractedId = _safeExtractVideoId(widget.cancion.youtubeLink);
+    if (extractedId.isEmpty) {
+      return 'assets/image.png';
+    }
+    videoId = extractedId;
+
+    final String cacheKey = _thumbnailCacheKey();
+    final Directory dir = await _thumbnailCacheDir();
+    final File localFile = File('${dir.path}/$cacheKey.jpg');
+
+    // 1) Si ya existe en disco, se usa directo (sirve incluso sin internet).
+    if (await localFile.exists()) {
+      await _touchThumbnailLru(cacheKey);
+      return localFile.path; // Se distingue de una URL por no empezar con http.
+    }
+
+    // 2) Sin conexión y sin caché local: no hay nada que mostrar salvo el
+    //    placeholder por defecto.
+    if (_hasConnection == false) {
+      return 'assets/image.png';
+    }
+
+    // 3) Con conexión: descargar la versión reducida (mqdefault, ~5-15 KB)
+    //    en vez de maxresdefault (puede pesar 100+ KB) y guardarla en disco.
+    final String thumbUrl = 'https://img.youtube.com/vi/$videoId/mqdefault.jpg';
+    try {
+      final response = await http.get(Uri.parse(thumbUrl));
+      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+        await localFile.writeAsBytes(response.bodyBytes);
+        await _touchThumbnailLru(cacheKey);
+        return localFile.path;
+      }
+    } catch (e) {
+      print('Error al descargar la miniatura: $e');
+    }
+
     return 'assets/image.png';
   }
 
+  /// true si la ruta es un archivo local (caché en disco), false si es una
+  /// URL de red o el asset por defecto. Se usa para decidir entre
+  /// Image.file(...) e Image.network(...) al mostrarla.
+  bool _isLocalFilePath(String path) {
+    return path.isNotEmpty && !path.startsWith('http') && path != 'assets/image.png';
+  }
+
+  Widget _buildThumbnailImage(String path, {required double height, BoxFit fit = BoxFit.cover}) {
+    if (path == 'assets/image.png') {
+      return Image.asset('assets/image.png', fit: fit, height: height, width: double.infinity);
+    }
+    if (_isLocalFilePath(path)) {
+      return Image.file(
+        File(path),
+        fit: fit,
+        height: height,
+        width: double.infinity,
+        errorBuilder: (context, error, stackTrace) {
+          return Image.asset('assets/image.png', fit: fit, height: height, width: double.infinity);
+        },
+      );
+    }
+    return Image.network(
+      path,
+      fit: fit,
+      height: height,
+      width: double.infinity,
+      errorBuilder: (context, error, stackTrace) {
+        return Image.asset('assets/image.png', fit: fit, height: height, width: double.infinity);
+      },
+    );
+  }
+
   /// Extrae el ID de video de un link de YouTube de forma segura.
-  /// Devuelve '' si el link es nulo, vacío, "null", o si convertUrlToId
-  /// no puede parsearlo — así se evita el crash del force-unwrap ('!').
   String _safeExtractVideoId(String? link) {
     if (link == null || link.isEmpty || link == "null") return '';
     try {
@@ -131,7 +272,7 @@ class _VcancionesState extends State<Vcanciones> {
   }
 
   void _onYoutubeValueChanged() {
-    final bool hasError = _youtubeController.value.hasError;
+    final bool hasError = _youtubeController?.value.hasError ?? false;
     if (hasError != _youtubeHasError) {
       setState(() {
         _youtubeHasError = hasError;
@@ -140,7 +281,7 @@ class _VcancionesState extends State<Vcanciones> {
   }
 
   void _onMultitrackValueChanged() {
-    final bool hasError = _multitrackController.value.hasError;
+    final bool hasError = _multitrackController?.value.hasError ?? false;
     if (hasError != _multitrackHasError) {
       setState(() {
         _multitrackHasError = hasError;
@@ -163,9 +304,6 @@ class _VcancionesState extends State<Vcanciones> {
     }
   }
 
-  /// Widget de reemplazo cuando un video no está disponible: link vacío/roto
-  /// (nunca tuvo un ID válido) o hasError=true (existía pero YouTube lo
-  /// rechaza: borrado, privado, bloqueado por región, etc.).
   Widget _buildVideoErrorFallback({
     required String message,
     required String? originalLink,
@@ -199,10 +337,43 @@ class _VcancionesState extends State<Vcanciones> {
     );
   }
 
-  Future<void> _extractColorsFromImage() async {
-    String thumbnailUrl = await _thumbnailFuture;
+  /// Aviso de "sin conexión" que reemplaza a los reproductores de YouTube
+  /// (video principal y multitrack) cuando no hay internet. Evita que el
+  /// usuario se quede esperando una carga que nunca va a terminar.
+  Widget _buildNoConnectionBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      margin: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.orange[50],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.orange[200]!),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.wifi_off, size: 36, color: Colors.orange),
+          const SizedBox(height: 8),
+          const Text(
+            'Sin conexión a internet. La letra y los acordes siguen disponibles, pero el video y el multitrack necesitan internet.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.black87, fontSize: 14),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            onPressed: _retryConnection,
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('Reintentar'),
+          ),
+        ],
+      ),
+    );
+  }
 
-    if (thumbnailUrl.isNotEmpty) {
+  Future<void> _extractColorsFromImage() async {
+    String thumbnailPath = await _thumbnailFuture;
+
+    if (thumbnailPath.isNotEmpty && thumbnailPath != 'assets/image.png') {
       final String cacheKey =
           'song_colors_v${_colorCacheVersion}_${videoId ?? widget.cancion.title}';
       final prefs = await SharedPreferences.getInstance();
@@ -227,8 +398,12 @@ class _VcancionesState extends State<Vcanciones> {
       }
 
       try {
+        final ImageProvider imageProvider = _isLocalFilePath(thumbnailPath)
+            ? FileImage(File(thumbnailPath)) as ImageProvider
+            : NetworkImage(thumbnailPath);
+
         final PaletteGenerator paletteGenerator = await PaletteGenerator.fromImageProvider(
-          NetworkImage(thumbnailUrl),
+          imageProvider,
         );
 
         Color dominantColor = paletteGenerator.dominantColor?.color ?? Colors.blue;
@@ -288,37 +463,22 @@ class _VcancionesState extends State<Vcanciones> {
     stopMetronome();
     stopAutoscroll();
     player.dispose();
-    _youtubeController.removeListener(_onYoutubeValueChanged);
-    _multitrackController.removeListener(_onMultitrackValueChanged);
-    _multitrackController.dispose();
-    _youtubeController.dispose();
+    _youtubeController?.removeListener(_onYoutubeValueChanged);
+    _multitrackController?.removeListener(_onMultitrackValueChanged);
+    _multitrackController?.dispose();
+    _youtubeController?.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
   List<TextSpan> parseLyrics(String text) {
-    // Unidad base de un acorde individual: raíz + sufijo + dígitos + bajo(s) opcional(es).
     final String _suffix =
         r'(?:maj7|maj|min|dim7|dim|aug|sus\d*|add\d*|m7|m9|m6|m|[°+])?';
-    // Bajo tras la barra: ahora soporta 0, 1 o VARIAS barras seguidas
-    // (ej. "C/E/G"), no solo una. Antes con "(?:...)?" solo se permitía una
-    // barra; con "(?:...)*" se permiten encadenadas.
     final String _bassPart =
         r'(?:\/[A-G][#b]?' + _suffix + r'\d*)*';
     final String _chordUnit =
         r'[A-G][#b]?' + _suffix + r'\d*' + _bassPart;
 
-    // Regex de acordes: uno o más "_chordUnit" unidos por guiones sin espacio
-    // (ej. "G-A", "D2-A2-G/Em-A-A/G-F#m-Bm"), rodeado de inicio/fin, espacio,
-    // o "/" (para casos como "// Dm Bb F C//", donde el último acorde queda
-    // pegado sin espacio al separador de repetición "//").
-    // IMPORTANTE: se detecta el acorde DONDE APAREZCA en la línea, sin exigir
-    // que toda la línea "parezca" de acordes. Se intentó esa restricción antes,
-    // pero las intros usan demasiados símbolos distintos como separadores
-    // ("...", "....", "//", "////", "x4", "(x4)", "*PIANO*", "(notas del coro)",
-    // etc.) y era imposible listarlos todos: cualquier símbolo no contemplado
-    // rompía la línea COMPLETA de acordes. Es más robusto reconocer acordes
-    // donde aparezcan y simplemente ignorar todo lo que no matchee el patrón.
     final chordRegex = RegExp(
       r'(?:(?<=^)|(?<=\s))' +
       '(?:$_chordUnit)' +
@@ -326,18 +486,8 @@ class _VcancionesState extends State<Vcanciones> {
       r'(?:(?=$)|(?=[\s/]))'
     );
 
-    // Regex de keywords (marcadores de sección)
     final keywordRegex = RegExp(
-    r'\b(?:CANCIÓN|TONALIDAD|TIEMPO|INTRO|VERSO(?: \d+)?|PRE-CORO|CORO 1 Y 2|CORO(?: \d+)?|INSTRUMENTAL|FINAL|ESTROFA|SOLO|PUENTE(?: \d+)?|BAJO|SALIDA(?: \d+)?)\b');
-
-    // Nota: se evaluó proteger la cabecera (CANCIÓN/TONALIDAD/TIEMPO/artista) de
-    // la detección de acordes, pero el formato real de las canciones NO es
-    // consistente: algunas tienen una línea en blanco después de la cabecera y
-    // otras no (ej. "PERDÓN" no la tiene), así que esa protección terminaba
-    // ocultando acordes reales del INTRO/primer verso en esas canciones. Se
-    // comprobó que los límites estrictos del chordRegex (debe estar rodeado de
-    // espacio/inicio/fin/"/") ya evitan por sí solos que palabras como
-    // "Marcos", "Brunet" o "Barrientos" se confundan con acordes.
+      r'\b(?:CANCIÓN|TONALIDAD|TIEMPO|INTRO|VERSO(?: \d+)?|PRE-CORO|CORO 1 Y 2|CORO(?: \d+)?|INSTRUMENTAL|FINAL|ESTROFA|SOLO|PUENTE(?: \d+)?|BAJO|SALIDA(?: \d+)?)\b');
 
     List<TextSpan> spans = [];
 
@@ -391,44 +541,33 @@ class _VcancionesState extends State<Vcanciones> {
   }
 
   String transposeChord(String chord) {
-    // 0) Soportar cadenas de acordes pegados con guion sin espacio (ej. "G-A",
-    //    "D2-A2-G/Em-A-A/G-F#m-Bm"): transponer cada uno por separado.
     if (chord.contains('-')) {
       return chord.split('-').map(transposeChord).join('-');
     }
 
-    // 1) Soportar bajos invertidos, incluyendo MÚLTIPLES barras (ej. "C/E",
-    //    "C/E/G"). Antes solo se tomaban parts[0] y parts[1] y cualquier bajo
-    //    extra tras una segunda barra se perdía silenciosamente al transponer.
-    //    Ahora se transponen todas las partes, sin importar cuántas haya.
     if (chord.contains('/')) {
       return chord.split('/').map(transposeChord).join('/');
     }
 
-    // 2) Separar raíz y sufijo
     final m = RegExp(r'^([A-G][#b]?)(.*)$').firstMatch(chord);
     if (m == null) return chord;
-    final root = m.group(1)!;   // p.ej. "D", "F#", "Bb"
-    final suffix = m.group(2)!; // p.ej. "m7", "maj", "sus4", "add9", ""
+    final root = m.group(1)!;
+    final suffix = m.group(2)!;
 
-    // 3) Listas cíclicas de 12 tonos (ambas formas)
     const sharpScale = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
     const flatScale  = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
 
-    // 4) Buscar índice en la escala correspondiente al accidental de la raíz
     int index = sharpScale.indexOf(root);
     bool hadSharp = true;
     if (index == -1) {
       index = flatScale.indexOf(root);
       hadSharp = false;
     }
-    if (index == -1) return chord; // raíz no reconocida
+    if (index == -1) return chord;
 
-    // 5) Calcular nuevo índice con wrap-around
     int newIndex = (index + transposeValue) % 12;
     if (newIndex < 0) newIndex += 12;
 
-    // 6) Elegir salida: si sube semitonos, usar sharps; si baja, flats; si 0, respetar original
     List<String> outScale;
     if (transposeValue > 0) {
       outScale = sharpScale;
@@ -438,7 +577,6 @@ class _VcancionesState extends State<Vcanciones> {
       outScale = hadSharp ? sharpScale : flatScale;
     }
 
-    // 7) Reconstruir acorde transpuesto
     final newRoot = outScale[newIndex];
     return '$newRoot$suffix';
   }
@@ -595,10 +733,13 @@ class _VcancionesState extends State<Vcanciones> {
     Navigator.pop(context);
   }
 
-  /// Reemplaza el patrón `convertUrlToId(link)!` (force-unwrap inseguro) por
-  /// una versión que, si el link es inválido, muestra el fallback en vez de
-  /// crashear la app.
   Widget _buildInstrumentPlayer(String link) {
+    if (_hasConnection == false) {
+      return _buildVideoErrorFallback(
+        message: 'Sin conexión a internet. Conéctate para ver este instrumento.',
+        originalLink: link,
+      );
+    }
     final String id = _safeExtractVideoId(link);
     if (id.isEmpty) {
       return _buildVideoErrorFallback(
@@ -611,6 +752,14 @@ class _VcancionesState extends State<Vcanciones> {
 
   @override
   Widget build(BuildContext context) {
+    if (_hasConnection == null) {
+      // Aún verificando conectividad antes de decidir qué mostrar.
+      return const Scaffold(
+        backgroundColor: Colors.white,
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return FutureBuilder<String>(
       future: _thumbnailFuture,
       builder: (context, snapshot) {
@@ -622,7 +771,8 @@ class _VcancionesState extends State<Vcanciones> {
         } else if (snapshot.hasError) {
           return const Center(child: Text('Error al cargar la imagen'));
         } else {
-          String thumbnailUrl = snapshot.data ?? '';
+          String thumbnailPath = snapshot.data ?? '';
+          bool hasThumbnail = thumbnailPath.isNotEmpty && thumbnailPath != 'assets/image.png';
 
           return Scaffold(
             backgroundColor: Colors.white,
@@ -657,24 +807,7 @@ class _VcancionesState extends State<Vcanciones> {
                       child: Stack(
                         children: [
                           Positioned.fill(
-                            child: thumbnailUrl.isNotEmpty
-                                ? Image.network(
-                                    thumbnailUrl,
-                                    fit: BoxFit.cover,
-                                    width: double.infinity,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return Image.asset(
-                                        'assets/image.png',
-                                        fit: BoxFit.cover,
-                                        width: double.infinity,
-                                      );
-                                    },
-                                  )
-                                : Image.asset(
-                                    'assets/image.png',
-                                    fit: BoxFit.cover,
-                                    width: double.infinity,
-                                  ),
+                            child: _buildThumbnailImage(thumbnailPath, height: 200),
                           ),
                           Positioned.fill(
                             child: Container(
@@ -690,7 +823,7 @@ class _VcancionesState extends State<Vcanciones> {
                               ),
                             ),
                           ),
-                          if (thumbnailUrl.isEmpty)
+                          if (!hasThumbnail)
                             const Positioned.fill(
                               child: Center(
                                 child: Text(
@@ -777,24 +910,7 @@ class _VcancionesState extends State<Vcanciones> {
                           automaticallyImplyLeading: false,
                           leading: Container(),
                           flexibleSpace: FlexibleSpaceBar(
-                            background: thumbnailUrl.isNotEmpty
-                                ? Image.network(
-                                    thumbnailUrl,
-                                    fit: BoxFit.cover,
-                                    width: double.infinity,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return Image.asset(
-                                        'assets/image.png',
-                                        fit: BoxFit.cover,
-                                        width: double.infinity,
-                                      );
-                                    },
-                                  )
-                                : Image.asset(
-                                    'assets/image.png',
-                                    fit: BoxFit.cover,
-                                    width: double.infinity,
-                                  ),
+                            background: _buildThumbnailImage(thumbnailPath, height: 200),
                           ),
                         ),
                         SliverList(
@@ -833,57 +949,34 @@ class _VcancionesState extends State<Vcanciones> {
                   : CustomScrollView(
                       controller: _scrollController,
                       slivers: [
-                        if (thumbnailUrl.isNotEmpty)
-                          SliverToBoxAdapter(
-                            child: Container(
-                              color: const Color.fromARGB(255, 255, 255, 255),
-                              child: Stack(
-                                children: [
-                                  Image.network(
-                                    thumbnailUrl,
-                                    fit: BoxFit.cover,
-                                    height: 200.0,
-                                    width: double.infinity,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return Image.asset(
-                                        'assets/icono.png',
-                                        fit: BoxFit.contain,
-                                        height: 200.0,
-                                        width: double.infinity,
-                                      );
-                                    },
-                                  ),
-                                  Positioned.fill(
-                                    child: Align(
-                                      alignment: Alignment.bottomCenter,
-                                      child: Container(
-                                        height: 80.0,
-                                        decoration: BoxDecoration(
-                                          gradient: LinearGradient(
-                                            begin: Alignment.topCenter,
-                                            end: Alignment.bottomCenter,
-                                            colors: [
-                                              Colors.transparent,
-                                              Colors.black.withOpacity(0.5),
-                                            ],
-                                          ),
+                        SliverToBoxAdapter(
+                          child: Container(
+                            color: const Color.fromARGB(255, 255, 255, 255),
+                            child: Stack(
+                              children: [
+                                _buildThumbnailImage(thumbnailPath, height: 200),
+                                Positioned.fill(
+                                  child: Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Container(
+                                      height: 80.0,
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          begin: Alignment.topCenter,
+                                          end: Alignment.bottomCenter,
+                                          colors: [
+                                            Colors.transparent,
+                                            Colors.black.withOpacity(0.5),
+                                          ],
                                         ),
                                       ),
                                     ),
                                   ),
-                                ],
-                              ),
-                            ),
-                          )
-                        else
-                          SliverToBoxAdapter(
-                            child: Image.asset(
-                              'assets/image.png',
-                              fit: BoxFit.cover,
-                              height: 200.0,
-                              width: double.infinity,
+                                ),
+                              ],
                             ),
                           ),
+                        ),
                         SliverList(
                           delegate: SliverChildBuilderDelegate(
                             (BuildContext context, int index) {
@@ -891,119 +984,123 @@ class _VcancionesState extends State<Vcanciones> {
                                 padding: const EdgeInsets.all(12.0),
                                 child: Column(
                                   children: [
-                                    if (widget.cancion.multitrackLink != null &&
-                                        widget.cancion.multitrackLink!.isNotEmpty)
-                                      ElevatedButton(
-                                        onPressed: () {
-                                          setState(() {
-                                            isMultitrackVisible = !isMultitrackVisible;
-                                          });
-                                        },
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: accentColor ?? Colors.grey,
-                                          foregroundColor: Colors.white,
+                                    if (_hasConnection == false)
+                                      _buildNoConnectionBanner()
+                                    else ...[
+                                      if (widget.cancion.multitrackLink != null &&
+                                          widget.cancion.multitrackLink!.isNotEmpty)
+                                        ElevatedButton(
+                                          onPressed: () {
+                                            setState(() {
+                                              isMultitrackVisible = !isMultitrackVisible;
+                                            });
+                                          },
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: accentColor ?? Colors.grey,
+                                            foregroundColor: Colors.white,
+                                          ),
+                                          child: Text(
+                                            isMultitrackVisible ? "OCULTAR" : "MULTITRACK",
+                                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                          ),
                                         ),
-                                        child: Text(
-                                          isMultitrackVisible ? "OCULTAR" : "MULTITRACK",
-                                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                                        ),
-                                      ),
-                                    const SizedBox(height: 10),
-                                    if (isMultitrackVisible)
-                                      _multitrackController.initialVideoId.isEmpty
-                                          ? _buildVideoErrorFallback(
-                                              message: 'El enlace del multitrack no es válido.',
-                                              originalLink: widget.cancion.multitrackLink,
-                                            )
-                                          : _multitrackHasError
-                                              ? _buildVideoErrorFallback(
-                                                  message: 'El video del multitrack ya no está disponible (puede haber sido eliminado o ser privado).',
-                                                  originalLink: widget.cancion.multitrackLink,
-                                                )
-                                              : Column(
-                                                  children: [
-                                                    YoutubePlayerBuilder(
-                                                      player: YoutubePlayer(
-                                                        controller: _multitrackController,
-                                                        showVideoProgressIndicator: false,
+                                      const SizedBox(height: 10),
+                                      if (isMultitrackVisible && _multitrackController != null)
+                                        (_multitrackController!.initialVideoId.isEmpty)
+                                            ? _buildVideoErrorFallback(
+                                                message: 'El enlace del multitrack no es válido.',
+                                                originalLink: widget.cancion.multitrackLink,
+                                              )
+                                            : _multitrackHasError
+                                                ? _buildVideoErrorFallback(
+                                                    message: 'El video del multitrack ya no está disponible (puede haber sido eliminado o ser privado).',
+                                                    originalLink: widget.cancion.multitrackLink,
+                                                  )
+                                                : Column(
+                                                    children: [
+                                                      YoutubePlayerBuilder(
+                                                        player: YoutubePlayer(
+                                                          controller: _multitrackController!,
+                                                          showVideoProgressIndicator: false,
+                                                        ),
+                                                        builder: (context, player) {
+                                                          return Column(
+                                                            children: [
+                                                              Opacity(
+                                                                opacity: 0.0,
+                                                                child: SizedBox(height: 1, child: player),
+                                                              ),
+                                                              ValueListenableBuilder(
+                                                                valueListenable: _multitrackController!,
+                                                                builder: (context, YoutubePlayerValue value, child) {
+                                                                  bool isReady = value.isReady;
+                                                                  return Column(
+                                                                    children: [
+                                                                      Slider(
+                                                                        value: value.position.inSeconds.toDouble(),
+                                                                        min: 0,
+                                                                        max: value.metaData.duration.inSeconds.toDouble() > 0
+                                                                            ? value.metaData.duration.inSeconds.toDouble()
+                                                                            : 1,
+                                                                        onChanged: isReady
+                                                                            ? (newValue) {
+                                                                                _multitrackController!.seekTo(
+                                                                                  Duration(seconds: newValue.toInt()),
+                                                                                );
+                                                                              }
+                                                                            : null,
+                                                                      ),
+                                                                      Row(
+                                                                        mainAxisAlignment: MainAxisAlignment.center,
+                                                                        children: [
+                                                                          IconButton(
+                                                                            icon: Icon(isMultitrackPlaying ? Icons.pause : Icons.play_arrow),
+                                                                            onPressed: isReady
+                                                                                ? () {
+                                                                                    setState(() {
+                                                                                      isMultitrackPlaying = !isMultitrackPlaying;
+                                                                                      if (isMultitrackPlaying) {
+                                                                                        _multitrackController!.play();
+                                                                                      } else {
+                                                                                        _multitrackController!.pause();
+                                                                                      }
+                                                                                    });
+                                                                                  }
+                                                                                : null,
+                                                                          ),
+                                                                          IconButton(
+                                                                            icon: const Icon(Icons.replay_10),
+                                                                            onPressed: isReady
+                                                                                ? () {
+                                                                                    final currentPosition = _multitrackController!.value.position;
+                                                                                    final newPosition = currentPosition - const Duration(seconds: 10);
+                                                                                    _multitrackController!.seekTo(newPosition);
+                                                                                  }
+                                                                                : null,
+                                                                          ),
+                                                                          IconButton(
+                                                                            icon: const Icon(Icons.forward_10),
+                                                                            onPressed: isReady
+                                                                                ? () {
+                                                                                    final currentPosition = _multitrackController!.value.position;
+                                                                                    final newPosition = currentPosition + const Duration(seconds: 10);
+                                                                                    _multitrackController!.seekTo(newPosition);
+                                                                                  }
+                                                                                : null,
+                                                                          ),
+                                                                        ],
+                                                                      ),
+                                                                    ],
+                                                                  );
+                                                                },
+                                                              ),
+                                                            ],
+                                                          );
+                                                        },
                                                       ),
-                                                      builder: (context, player) {
-                                                        return Column(
-                                                          children: [
-                                                            Opacity(
-                                                              opacity: 0.0,
-                                                              child: SizedBox(height: 1, child: player),
-                                                            ),
-                                                            ValueListenableBuilder(
-                                                              valueListenable: _multitrackController,
-                                                              builder: (context, YoutubePlayerValue value, child) {
-                                                                bool isReady = value.isReady;
-                                                                return Column(
-                                                                  children: [
-                                                                    Slider(
-                                                                      value: value.position.inSeconds.toDouble(),
-                                                                      min: 0,
-                                                                      max: value.metaData.duration.inSeconds.toDouble() > 0
-                                                                          ? value.metaData.duration.inSeconds.toDouble()
-                                                                          : 1,
-                                                                      onChanged: isReady
-                                                                          ? (newValue) {
-                                                                              _multitrackController.seekTo(
-                                                                                Duration(seconds: newValue.toInt()),
-                                                                              );
-                                                                            }
-                                                                          : null,
-                                                                    ),
-                                                                    Row(
-                                                                      mainAxisAlignment: MainAxisAlignment.center,
-                                                                      children: [
-                                                                        IconButton(
-                                                                          icon: Icon(isMultitrackPlaying ? Icons.pause : Icons.play_arrow),
-                                                                          onPressed: isReady
-                                                                              ? () {
-                                                                                  setState(() {
-                                                                                    isMultitrackPlaying = !isMultitrackPlaying;
-                                                                                    if (isMultitrackPlaying) {
-                                                                                      _multitrackController.play();
-                                                                                    } else {
-                                                                                      _multitrackController.pause();
-                                                                                    }
-                                                                                  });
-                                                                                }
-                                                                              : null,
-                                                                        ),
-                                                                        IconButton(
-                                                                          icon: const Icon(Icons.replay_10),
-                                                                          onPressed: isReady
-                                                                              ? () {
-                                                                                  final currentPosition = _multitrackController.value.position;
-                                                                                  final newPosition = currentPosition - const Duration(seconds: 10);
-                                                                                  _multitrackController.seekTo(newPosition);
-                                                                                }
-                                                                              : null,
-                                                                        ),
-                                                                        IconButton(
-                                                                          icon: const Icon(Icons.forward_10),
-                                                                          onPressed: isReady
-                                                                              ? () {
-                                                                                  final currentPosition = _multitrackController.value.position;
-                                                                                  final newPosition = currentPosition + const Duration(seconds: 10);
-                                                                                  _multitrackController.seekTo(newPosition);
-                                                                                }
-                                                                              : null,
-                                                                        ),
-                                                                      ],
-                                                                    ),
-                                                                  ],
-                                                                );
-                                                              },
-                                                            ),
-                                                          ],
-                                                        );
-                                                      },
-                                                    ),
-                                                  ],
-                                                ),
+                                                    ],
+                                                  ),
+                                    ],
                                     const SizedBox(height: 10),
                                     Row(
                                       children: [
@@ -1056,12 +1153,14 @@ class _VcancionesState extends State<Vcanciones> {
                                       ),
                                     ),
                                     const SizedBox(height: 20),
-                                    if (widget.cancion.youtubeLink != null &&
+                                    if (_hasConnection == true &&
+                                        widget.cancion.youtubeLink != null &&
                                         widget.cancion.youtubeLink != "null" &&
-                                        widget.cancion.youtubeLink!.isNotEmpty)
+                                        widget.cancion.youtubeLink!.isNotEmpty &&
+                                        _youtubeController != null)
                                       Container(
                                         margin: const EdgeInsets.symmetric(vertical: 10),
-                                        child: _youtubeController.initialVideoId.isEmpty
+                                        child: _youtubeController!.initialVideoId.isEmpty
                                             ? _buildVideoErrorFallback(
                                                 message: 'Este enlace de YouTube no es válido o está roto.',
                                                 originalLink: widget.cancion.youtubeLink,
@@ -1073,31 +1172,31 @@ class _VcancionesState extends State<Vcanciones> {
                                                   )
                                                 : GestureDetector(
                                                     onDoubleTap: () {
-                                                      _youtubeController.seekTo(
-                                                        _youtubeController.value.position + const Duration(seconds: 10),
+                                                      _youtubeController!.seekTo(
+                                                        _youtubeController!.value.position + const Duration(seconds: 10),
                                                       );
                                                     },
                                                     onLongPress: () {
-                                                      _youtubeController.setPlaybackRate(2.0);
+                                                      _youtubeController!.setPlaybackRate(2.0);
                                                     },
                                                     onLongPressEnd: (_) {
-                                                      _youtubeController.setPlaybackRate(1.0);
+                                                      _youtubeController!.setPlaybackRate(1.0);
                                                     },
                                                     child: Stack(
                                                       alignment: Alignment.center,
                                                       children: [
                                                         YoutubePlayer(
-                                                          controller: _youtubeController,
+                                                          controller: _youtubeController!,
                                                           showVideoProgressIndicator: true,
                                                         ),
                                                         ValueListenableBuilder(
-                                                          valueListenable: _youtubeController,
+                                                          valueListenable: _youtubeController!,
                                                           builder: (context, YoutubePlayerValue value, child) {
                                                             if (!value.isPlaying && !value.hasError) {
                                                               return IconButton(
                                                                 icon: const Icon(Icons.play_arrow, size: 64, color: Colors.white),
                                                                 onPressed: () {
-                                                                  _youtubeController.play();
+                                                                  _youtubeController!.play();
                                                                 },
                                                               );
                                                             }
@@ -1181,8 +1280,7 @@ class _VcancionesState extends State<Vcanciones> {
 
 /// Reproductor aislado para cada link de instrumento (voces/guitarra/piano/
 /// bajo/batería). Cada uno crea y gestiona su propio YoutubePlayerController
-/// y escucha value.hasError para mostrar el fallback si el video se cayó,
-/// en vez de dejar el player roto sin explicación.
+/// y escucha value.hasError para mostrar el fallback si el video se cayó.
 class _InstrumentYoutubePlayer extends StatefulWidget {
   final String videoId;
   final String originalLink;
