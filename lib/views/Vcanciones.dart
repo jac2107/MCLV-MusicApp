@@ -6,6 +6,7 @@ import '../models/Mcanciones.dart';
 import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class Vcanciones extends StatefulWidget {
   final Song cancion;
@@ -19,7 +20,6 @@ class Vcanciones extends StatefulWidget {
 class _VcancionesState extends State<Vcanciones> {
   late Future<String> _thumbnailFuture;
   bool isMetronomePlaying = false;
-  Timer? metronomeTimer;
   int transposeValue = 0;
   final int originalTransposeValue = 0;
   bool showTransposeButtons = false;
@@ -69,10 +69,9 @@ void initState() {
 }
 
 Future<String> _getThumbnailUrl() async {
-  if (widget.cancion.youtubeLink != null &&
-      widget.cancion.youtubeLink != "null" &&
-      widget.cancion.youtubeLink!.isNotEmpty) {
-    videoId = YoutubePlayer.convertUrlToId(widget.cancion.youtubeLink!);
+  final String extractedId = _safeExtractVideoId(widget.cancion.youtubeLink);
+  if (extractedId.isNotEmpty) {
+    videoId = extractedId;
     final String maxresUrl = 'https://img.youtube.com/vi/$videoId/maxresdefault.jpg';
     final String fallbackUrl = 'https://img.youtube.com/vi/$videoId/0.jpg';
 
@@ -91,11 +90,22 @@ Future<String> _getThumbnailUrl() async {
   return 'assets/image.png'; // Si no hay enlace, retorna la imagen predeterminada
 }
 
+  /// Extrae el ID de video de un link de YouTube de forma segura.
+  /// Antes se usaba `convertUrlToId(...)!` con force-unwrap: si el link tenía
+  /// un formato inválido (typo, link roto, etc.), convertUrlToId devolvía null
+  /// y el "!" hacía crashear la app. Ahora simplemente devuelve '' en ese caso.
+  String _safeExtractVideoId(String? link) {
+    if (link == null || link.isEmpty || link == "null") return '';
+    try {
+      return YoutubePlayer.convertUrlToId(link) ?? '';
+    } catch (e) {
+      return '';
+    }
+  }
+
   void _initializeYoutubeControllers() {
     _multitrackController = YoutubePlayerController(
-      initialVideoId: widget.cancion.multitrackLink != null && widget.cancion.multitrackLink != "null"
-          ? YoutubePlayer.convertUrlToId(widget.cancion.multitrackLink!)!
-          : '',
+      initialVideoId: _safeExtractVideoId(widget.cancion.multitrackLink),
       flags: const YoutubePlayerFlags(
         autoPlay: false,
         mute: false,
@@ -103,9 +113,7 @@ Future<String> _getThumbnailUrl() async {
     );
 
    _youtubeController = YoutubePlayerController(
-  initialVideoId: widget.cancion.youtubeLink != null && widget.cancion.youtubeLink != "null"
-      ? YoutubePlayer.convertUrlToId(widget.cancion.youtubeLink!)!
-      : '',
+  initialVideoId: _safeExtractVideoId(widget.cancion.youtubeLink),
   flags: const YoutubePlayerFlags(
     autoPlay: false,
     mute: false,
@@ -135,6 +143,24 @@ GestureDetector(
     String thumbnailUrl = await _thumbnailFuture;
 
     if (thumbnailUrl.isNotEmpty) {
+      // Clave de caché: por videoId si existe, si no por título (fallback estable).
+      final String cacheKey = 'song_colors_${videoId ?? widget.cancion.title}';
+      final prefs = await SharedPreferences.getInstance();
+      final String? cached = prefs.getString(cacheKey);
+
+      if (cached != null) {
+        // Ya calculamos los colores de esta canción antes: reusarlos sin
+        // volver a descargar la miniatura ni recalcular la paleta.
+        final parts = cached.split(',');
+        if (parts.length == 3) {
+          primaryColor = Color(int.parse(parts[0]));
+          secondaryColor = Color(int.parse(parts[1]));
+          accentColor = Color(int.parse(parts[2]));
+          setState(() {});
+          return;
+        }
+      }
+
       try {
         final PaletteGenerator paletteGenerator = await PaletteGenerator.fromImageProvider(
           NetworkImage(thumbnailUrl),
@@ -145,6 +171,12 @@ GestureDetector(
         primaryColor = dominantColor;
         secondaryColor = _getContrastingColor(lighten(dominantColor, 0.2));
         accentColor = _getContrastingColor(darken(dominantColor, 0.2));
+
+        // Guardar en caché para no repetir este trabajo la próxima vez.
+        await prefs.setString(
+          cacheKey,
+          '${primaryColor!.value},${secondaryColor!.value},${accentColor!.value}',
+        );
       } catch (e) {
         primaryColor = Color.fromARGB(255, 0, 0, 0);  // Negro profundo
         secondaryColor = Color.fromARGB(255, 161, 119, 69);  // Dorado oscuro
@@ -202,24 +234,42 @@ void dispose() {
 }
 
 List<TextSpan> parseLyrics(String text) {
-  // 1) Regex de acordes: 
-  //    - detecta A–G con opcional #/b, sufijos y dígitos,
-  //    - opcionalmente "/[A-G][#b]?..." para bajos compuestos,
-  //    - se asegura de que esté entre espacios o bordes de línea.
+  // Unidad base de un acorde individual: raíz + sufijo + dígitos + bajo opcional.
+  // '-' se sacó de los sufijos (era ambiguo) porque en tus canciones el guion
+  // se usa para UNIR varios acordes pegados sin espacio (ej. "G-A", "F#m-Bm"),
+  // no como notación de acorde menor.
+  final String _suffix =
+      r'(?:maj7|maj|min|dim7|dim|aug|sus\d*|add\d*|m7|m9|m6|m|[°+])?';
+  final String _chordUnit =
+      r'[A-G][#b]?' + _suffix + r'\d*' + r'(?:\/[A-G][#b]?' + _suffix + r'\d*)?';
+
+  // 1) Regex de acordes: uno o más "_chordUnit" unidos por guiones sin espacio
+  //    (ej. "G-A", "D2-A2-G/Em-A-A/G-F#m-Bm"), rodeado de inicio/fin o espacio.
   final chordRegex = RegExp(
-    r'(?<=^|\s)' +                                // antes: inicio o espacio
-    r'(?:' +
-      r'[A-G][#b]?'+                              // raíz con opcional #/b
-      r'(?:m|maj|min|dim|aug|sus\d*|7|m7)?' +     // sufijos
-      r'\d*' +                                    // dígitos opcionales
-    r')' +
-    r'(?:\/' +                                    // opcional bajo compuesto
-      r'[A-G][#b]?' +
-      r'(?:m|maj|min|dim|aug|sus\d*|7|m7)?' +
-      r'\d*' +
-    r')?' +
-    r'(?=$|\s)'                                   // después: fin o espacio
+    r'(?<=^|\s)' +
+    '(?:$_chordUnit)' +
+    '(?:-(?:$_chordUnit))*' +
+    r'(?=$|\s)'
   );
+
+  // 1b) Versión "anclada" (^...$) para decidir si una LÍNEA COMPLETA es una
+  // línea de acordes o una línea de letra normal. Antes el chordRegex se
+  // aplicaba token por token sobre cualquier línea, así que una palabra suelta
+  // en mayúscula dentro de la letra (ej. una "A" o "E" que sea preposición,
+  // no acorde) se pintaba y transponía como si fuera un acorde real.
+  final chordOnlyLineToken = RegExp(
+    '^(?:(?:$_chordUnit)(?:-(?:$_chordUnit))*|[/|.x]+|-)\$'
+  );
+
+  bool _looksLikeChordLine(String line) {
+    final trimmed = line.trim();
+    if (trimmed.isEmpty) return false;
+    final tokens = trimmed.split(RegExp(r'\s+'));
+    // Es línea de acordes solo si TODOS los tokens no vacíos parecen acordes
+    // (o separadores de repetición como "//", "x4", "-" suelto), nunca si hay
+    // alguna palabra de letra normal mezclada.
+    return tokens.every((t) => chordOnlyLineToken.hasMatch(t));
+  }
 
   // 2) Regex de keywords (igual que antes)
   final keywordRegex = RegExp(
@@ -228,9 +278,11 @@ List<TextSpan> parseLyrics(String text) {
   List<TextSpan> spans = [];
 
   for (var line in text.split('\n')) {
+    final bool isChordLine = _looksLikeChordLine(line);
+
     final matches = <RegExpMatch>[
       ...keywordRegex.allMatches(line),
-      ...chordRegex.allMatches(line),
+      if (isChordLine) ...chordRegex.allMatches(line),
     ]..sort((a, b) => a.start.compareTo(b.start));
 
     int currentIndex = 0;
@@ -246,7 +298,7 @@ List<TextSpan> parseLyrics(String text) {
       TextStyle style;
       String rendered;
 
-      if (chordRegex.hasMatch(token)) {
+      if (isChordLine && chordRegex.hasMatch(token)) {
         rendered = transposeChord(token);
         style = TextStyle(
           color: secondaryColor ?? Color(0xFF4A90E2),
@@ -278,6 +330,12 @@ List<TextSpan> parseLyrics(String text) {
 
 
 String transposeChord(String chord) {
+  // 0) Soportar cadenas de acordes pegados con guion sin espacio (ej. "G-A",
+  //    "D2-A2-G/Em-A-A/G-F#m-Bm"): transponer cada uno por separado.
+  if (chord.contains('-')) {
+    return chord.split('-').map(transposeChord).join('-');
+  }
+
   // 1) Soportar bajos invertidos (e.g. G/Bb)
   if (chord.contains('/')) {
     final parts = chord.split('/');
@@ -343,6 +401,14 @@ String transposeChord(String chord) {
   }
 
 void toggleMetronome() {
+  if (widget.cancion.tiempo <= 0) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Esta canción no tiene un tiempo (BPM) configurado, no se puede usar el metrónomo.'),
+      ),
+    );
+    return;
+  }
   setState(() {
     isMetronomePlaying = !isMetronomePlaying;
     if (isMetronomePlaying) {
@@ -359,6 +425,10 @@ void toggleMetronome() {
 
 /// Inicia el metrónomo
 void startMetronome() {
+  if (widget.cancion.tiempo <= 0) {
+    _metronomeRunning = false;
+    return; // Evita división por cero (Infinity.round() crashea la app)
+  }
   _metronomeRunning = true;
   _intervalMs = (60000 / widget.cancion.tiempo).round();
   _metronomeStart = DateTime.now();
@@ -955,6 +1025,7 @@ void stopAutoscroll() {
                                         IconButton(
                                           icon: Icon(isMetronomePlaying ? Icons.pause : Icons.play_arrow),
                                           onPressed: toggleMetronome,
+                                          color: widget.cancion.tiempo <= 0 ? Colors.grey : null,
                                           padding: EdgeInsets.zero,
                                         ),
                                       ],

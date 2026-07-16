@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'notifications_handler.dart'; // Importa el handler común
-String? lastHandledNotificationId;
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -27,102 +24,15 @@ class NotificationsPage extends StatefulWidget {
 
 class _NotificationsPageState extends State<NotificationsPage> {
   List<SerializableMessage> _messages = [];
-  final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
   @override
-@override
-void initState() {
-  super.initState();
-  _requestPermissions();
-  _initializeLocalNotifications();
-  _loadMessages();
-  _checkForInitialMessage(); // Agregado para cuando la app se abre desde terminated
-  _configureFirebaseListeners(); // Asegúrate de que esto esté llamado correctamente
-}
-
-  
-
-  void _checkForInitialMessage() async {
-    RemoteMessage? initialMessage = await FirebaseMessaging.instance.getInitialMessage();
-    if (initialMessage != null && initialMessage.data.containsKey("url") && initialMessage.data["url"]!.isNotEmpty) {
-      _launchURL(initialMessage.data["url"]!);
-    }
+  void initState() {
+    super.initState();
+    // La inicialización de Firebase Messaging y notificaciones locales ya se
+    // hace UNA sola vez en main.dart al arrancar la app. Esta pantalla solo
+    // necesita leer el historial ya guardado.
+    _loadMessages();
   }
-
-  Future<void> _requestPermissions() async {
-    await FirebaseMessaging.instance.requestPermission();
-  }
-
-Future<void> _initializeLocalNotifications() async {
-  const AndroidInitializationSettings androidSettings =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
-  final InitializationSettings initializationSettings =
-      InitializationSettings(android: androidSettings);
-
-  await flutterLocalNotificationsPlugin.initialize(
-    initializationSettings,
-    onDidReceiveNotificationResponse: (NotificationResponse response) async {
-      if (response.payload != null && response.payload!.isNotEmpty) {
-        // Abre el enlace del payload (URL) directamente
-        _launchURL(response.payload!);
-      }
-    },
-  );
-}
-
-
-bool _isNotificationHandled = false;
-
-void _configureFirebaseListeners() {
-  // Escucha las notificaciones cuando la app está en primer plano
-  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-    print("Mensaje en foreground recibido: ${message.messageId}");
-    
-    // Verifica si la notificación ya ha sido borrada de la barra de notificaciones
-    if (message.notification != null) {
-      // Solo guarda si no ha sido eliminada de la barra
-      saveMessage(message);
-    }
-  });
-
-  // Este listener escucha cuando la notificación es tocada
-  FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-    print("Mensaje al hacer click (foreground): ${message.messageId}");
-    if (message.data['url'] != null && message.data['url']!.isNotEmpty) {
-      _launchURL(message.data['url']!);
-    }
-  });
-
-  // Escucha las notificaciones cuando la app está en segundo plano o cerrada
-  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-}
-
-
-Future<void> _showNotification(RemoteMessage message) async {
-  int notificationId = DateTime.now().millisecondsSinceEpoch.remainder(100000);
-  const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-    'your_channel_id',
-    'your_channel_name',
-    channelDescription: 'your_channel_description',
-    importance: Importance.max,
-    priority: Priority.high,
-    playSound: true, // Reproduce sonido de notificación
-    autoCancel: true, // Se cancela automáticamente después de ser tocada
-  );
-  const NotificationDetails notificationDetails = NotificationDetails(android: androidDetails);
-
-  // Enviamos el URL como payload
-  await flutterLocalNotificationsPlugin.show(
-    notificationId,
-    message.notification?.title,
-    message.notification?.body,
-    notificationDetails,
-    payload: message.data['url'] ?? '',  // El URL se pasa en el payload
-  );
-
-  // Guarda el mensaje en el historial
-  await saveMessage(message);
-}
 
 
 
@@ -219,7 +129,6 @@ Widget build(BuildContext context) {
                   onTap: () {
                     setState(() {
                       message.seen = true;
-                      _isNotificationHandled = false; // Reinicia el estado al tocar la notificación
                     });
                     _updateMessagesStorage();
                     if (message.url != null && message.url!.isNotEmpty) {
