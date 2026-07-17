@@ -142,8 +142,8 @@ class _VcancionesState extends State<Vcanciones> {
     return dir;
   }
 
-  String _thumbnailCacheKey() => 'thumb_${videoId ?? widget.cancion.title}';
-
+static const int _thumbnailCacheVersion = 2; // súbelo cuando cambies la calidad de imagen
+  String _thumbnailCacheKey() => 'thumb_v${_thumbnailCacheVersion}_${videoId ?? widget.cancion.title}';
   /// Registra el uso de una miniatura en el orden LRU y borra la más
   /// antigua si se supera el límite de _maxCachedThumbnails.
   Future<void> _touchThumbnailLru(String key) async {
@@ -193,9 +193,9 @@ class _VcancionesState extends State<Vcanciones> {
       return 'assets/image.png';
     }
 
-    // 3) Con conexión: descargar la versión reducida (mqdefault, ~5-15 KB)
-    //    en vez de maxresdefault (puede pesar 100+ KB) y guardarla en disco.
-    final String thumbUrl = 'https://img.youtube.com/vi/$videoId/mqdefault.jpg';
+    // 3) Con conexión: descargar hqdefault (480x360, ~15-25 KB) — mejor
+    //    nitidez que mqdefault sin llegar al peso de maxresdefault.
+    final String thumbUrl = 'https://img.youtube.com/vi/$videoId/hqdefault.jpg';
     try {
       final response = await http.get(Uri.parse(thumbUrl));
       if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {

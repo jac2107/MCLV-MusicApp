@@ -67,15 +67,13 @@ class HomePage extends StatelessWidget {
                       children: [
                         _CategoryCard(
                           title: 'Adoraciones',
-                          subtitle: 'Momentos de intimidad',
-                          icon: Icons.self_improvement,
+                          icon: Icons.piano_rounded,
                           gradient: AppColors.blueGradient,
                           page: CategoriaPage(config: categoriaAdoracion),
                         ),
                         const SizedBox(height: 18),
                         _CategoryCard(
                           title: 'Alabanzas',
-                          subtitle: 'Celebra con gozo',
                           icon: Icons.celebration,
                           gradient: AppColors.goldGradient,
                           page: CategoriaPage(config: categoriaAlabanza),
@@ -83,7 +81,6 @@ class HomePage extends StatelessWidget {
                         const SizedBox(height: 18),
                         _CategoryCard(
                           title: 'Para mejorar',
-                          subtitle: 'Ayúdanos a crecer',
                           icon: Icons.favorite_rounded,
                           gradient: const LinearGradient(
                             colors: [AppColors.softBlueGray, AppColors.steelBlueLight],
@@ -155,7 +152,6 @@ class _RoundIconButton extends StatelessWidget {
 
 class _CategoryCard extends StatefulWidget {
   final String title;
-  final String subtitle;
   final IconData icon;
   final Gradient gradient;
   final Widget page;
@@ -163,7 +159,6 @@ class _CategoryCard extends StatefulWidget {
 
   const _CategoryCard({
     required this.title,
-    required this.subtitle,
     required this.icon,
     required this.gradient,
     required this.page,
@@ -225,26 +220,13 @@ class _CategoryCardState extends State<_CategoryCard> {
               ),
               const SizedBox(width: 16),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.title,
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: textColor,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      widget.subtitle,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: textColor.withOpacity(0.8),
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  widget.title,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                  ),
                 ),
               ),
               Icon(Icons.arrow_forward_ios_rounded, color: textColor.withOpacity(0.7), size: 18),
