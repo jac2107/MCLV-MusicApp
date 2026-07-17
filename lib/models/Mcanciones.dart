@@ -12,6 +12,8 @@ class Song {
   final List<String>? drumsLink; // Enlace para batería (opcional)
   final List<String>? voicesLinks; // Enlace para voces (opcional)
   final int? instrument;
+  final String? textPlano; // Versión simplificada para el buscador (Firestore)
+  final String? categoria; // "adoracion" o "alabanza" (Firestore)
 
   Song({
     required this.title,
@@ -27,7 +29,56 @@ class Song {
     this.bassLink,
     this.drumsLink,
     this.voicesLinks,
+    this.textPlano,
+    this.categoria,
   });
+
+  /// Construye una Song a partir de un documento de Firestore.
+  factory Song.fromMap(Map<String, dynamic> map) {
+    List<String>? asStringList(dynamic value) {
+      if (value == null) return null;
+      return List<String>.from(value as List);
+    }
+
+    return Song(
+      title: map['title'] as String,
+      text: map['text'] as String,
+      tonalidad: map['tonalidad'] as String? ?? '',
+      tiempo: (map['tiempo'] as num?)?.toInt() ?? 0,
+      status: (map['status'] as num?)?.toInt(),
+      instrument: (map['instrument'] as num?)?.toInt(),
+      multitrackLink: map['multitrackLink'] as String?,
+      youtubeLink: map['youtubeLink'] as String?,
+      guitarLink: asStringList(map['guitarLink']),
+      pianoLink: asStringList(map['pianoLink']),
+      bassLink: asStringList(map['bassLink']),
+      drumsLink: asStringList(map['drumsLink']),
+      voicesLinks: asStringList(map['voicesLinks']),
+      textPlano: map['textPlano'] as String?,
+      categoria: map['categoria'] as String?,
+    );
+  }
+
+  /// Convierte esta Song a un Map serializable (para cache local en JSON).
+  Map<String, dynamic> toMap() {
+    return {
+      'title': title,
+      'text': text,
+      'tonalidad': tonalidad,
+      'tiempo': tiempo,
+      'status': status,
+      'instrument': instrument,
+      'multitrackLink': multitrackLink,
+      'youtubeLink': youtubeLink,
+      'guitarLink': guitarLink,
+      'pianoLink': pianoLink,
+      'bassLink': bassLink,
+      'drumsLink': drumsLink,
+      'voicesLinks': voicesLinks,
+      'textPlano': textPlano,
+      'categoria': categoria,
+    };
+  }
 }
  /*
   Song(

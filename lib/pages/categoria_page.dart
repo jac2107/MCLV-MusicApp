@@ -5,6 +5,7 @@ import 'package:diacritic/diacritic.dart' as diacritic_pkg;
 import '../models/Mcanciones.dart';
 import '../views/Vcanciones.dart';
 import 'medley.dart';
+import '../models/song_repository.dart';
 
 // Configuración de cada categoría: colores, textos, listas de canciones y
 // medleys predeterminados. Así CategoriaPage sirve tanto para Adoraciones
@@ -14,8 +15,9 @@ class CategoriaConfig {
   final Color primaryColor;
   final Color foregroundColor;
   final String storageKey; // key en SharedPreferences para medleys custom
-  final List<Song> cancionesCompletas;
-  final List<Song> cancionesSimplificadas;
+  final String categoriaKey; // "adoracion" o "alabanza" — clave en Firestore/cache
+  final List<Song> cancionesCompletas; // fallback si nunca hubo sincronización
+  final List<Song> cancionesSimplificadas; // fallback si nunca hubo sincronización
   final List<Medley> medleysPredeterminados;
 
   const CategoriaConfig({
@@ -23,6 +25,7 @@ class CategoriaConfig {
     required this.primaryColor,
     required this.foregroundColor,
     required this.storageKey,
+    required this.categoriaKey,
     required this.cancionesCompletas,
     required this.cancionesSimplificadas,
     required this.medleysPredeterminados,
@@ -34,6 +37,7 @@ final CategoriaConfig categoriaAdoracion = CategoriaConfig(
   primaryColor: const Color(0xFF2F4858),
   foregroundColor: Colors.white,
   storageKey: "custom_medleys",
+  categoriaKey: "adoracion",
   cancionesCompletas: cancionesCompletas,
   cancionesSimplificadas: cancionesSimplificadas,
   medleysPredeterminados: [
@@ -61,6 +65,7 @@ final CategoriaConfig categoriaAlabanza = CategoriaConfig(
   primaryColor: const Color(0xFFC49A6C),
   foregroundColor: Colors.white,
   storageKey: "custom_medleys1",
+  categoriaKey: "alabanza",
   cancionesCompletas: cancionesCompletas1,
   cancionesSimplificadas: cancionesSimplificadas1,
   medleysPredeterminados: [
@@ -98,14 +103,21 @@ class _CategoriaPageState extends State<CategoriaPage> {
   String? _selectedTonalidad;
   late List<Medley> _medleys;
 
+  // Canciones cargadas desde cache local / Firestore (reemplazan las
+  // listas estáticas de config.cancionesCompletas/cancionesSimplificadas,
+  // que ahora solo se usan como fallback si el cache está vacío).
+  List<Song> _canciones = [];
+  bool _cargandoCanciones = true;
+  bool _huboActualizacion = false;
+
   CategoriaConfig get config => widget.config;
 
   @override
   void initState() {
     super.initState();
-    _filteredSongs = config.cancionesSimplificadas;
     _medleys = List<Medley>.from(config.medleysPredeterminados);
     _loadCustomMedleys();
+    _cargarCanciones();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       setState(() {
@@ -114,6 +126,33 @@ class _CategoriaPageState extends State<CategoriaPage> {
     });
   }
 
+Future<void> _cargarCanciones() async {
+    // 1. Cache local primero (instantáneo, funciona sin internet)
+    final cache = await SongRepository.instance.loadFromCache(config.categoriaKey);
+
+    // Fallback estático (Mcanciones.dart), ordenado alfabéticamente igual
+    // que el cache/Firestore, por si el cache está vacío (primera instalación
+    // sin internet).
+    final fallbackOrdenado = List<Song>.from(config.cancionesCompletas)
+      ..sort((a, b) => a.title.toUpperCase().compareTo(b.title.toUpperCase()));
+
+    if (!mounted) return;
+    setState(() {
+      _canciones = cache.isNotEmpty ? cache : fallbackOrdenado;
+      _filteredSongs = _canciones;
+      _cargandoCanciones = false;
+    });
+
+    // 2. Sincronización en segundo plano (silenciosa, no bloquea la UI)
+    SongRepository.instance.syncFromFirestore(config.categoriaKey).then((fresh) {
+      if (!mounted || fresh == null) return;
+      setState(() {
+        _canciones = fresh;
+        _huboActualizacion = true;
+      });
+      _filterSongs(_searchController.text); // re-aplica el filtro activo
+    });
+  }
   Future<void> _loadCustomMedleys() async {
     final prefs = await SharedPreferences.getInstance();
     final String? medleysJson = prefs.getString(config.storageKey);
@@ -136,11 +175,13 @@ class _CategoriaPageState extends State<CategoriaPage> {
 
   void _filterSongs(String query) {
     String normalizedQuery = diacritic_pkg.removeDiacritics(query.toLowerCase());
-    List<Song> tempSongs = config.cancionesSimplificadas;
+    List<Song> tempSongs = _canciones;
     if (normalizedQuery.isNotEmpty) {
       tempSongs = tempSongs.where((song) {
         String normalizedTitle = diacritic_pkg.removeDiacritics(song.title.toLowerCase());
-        String normalizedText = diacritic_pkg.removeDiacritics(song.text.toLowerCase());
+        // Busca en textPlano si existe (más liviano), si no en text completo
+        String normalizedText = diacritic_pkg
+            .removeDiacritics((song.textPlano ?? song.text).toLowerCase());
         return normalizedTitle.contains(normalizedQuery) ||
             normalizedText.contains(normalizedQuery);
       }).toList();
@@ -358,6 +399,7 @@ class _CategoriaPageState extends State<CategoriaPage> {
                                       builder: (context) => CrearMedleyPage(
                                         config: config,
                                         medley: medley,
+                                        canciones: _canciones,
                                       ),
                                     ),
                                   );
@@ -434,7 +476,7 @@ class _CategoriaPageState extends State<CategoriaPage> {
     Medley? newMedley = await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => CrearMedleyPage(config: config),
+        builder: (context) => CrearMedleyPage(config: config, canciones: _canciones),
       ),
     );
     if (newMedley != null) {
@@ -449,7 +491,8 @@ class _CategoriaPageState extends State<CategoriaPage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => MedleyDetailPage(config: config, medley: medley),
+        builder: (context) =>
+            MedleyDetailPage(config: config, medley: medley, canciones: _canciones),
       ),
     );
   }
@@ -464,11 +507,11 @@ class _CategoriaPageState extends State<CategoriaPage> {
           minimumSize: const Size(double.infinity, 55),
         ),
         onPressed: () {
-          Song fullSong =
-              config.cancionesCompletas.firstWhere((s) => s.title == song.title);
+          // song ya trae el texto completo con acordes (viene de Firestore/cache),
+          // no hace falta buscarlo en otra lista.
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => Vcanciones(cancion: fullSong)),
+            MaterialPageRoute(builder: (context) => Vcanciones(cancion: song)),
           );
         },
         child: Text(song.title, style: const TextStyle(fontSize: 20)),
@@ -483,6 +526,22 @@ class _CategoriaPageState extends State<CategoriaPage> {
         title: Text(config.appBarTitle),
         backgroundColor: config.primaryColor,
         foregroundColor: config.foregroundColor,
+        actions: [
+          if (_cargandoCanciones)
+            const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+            )
+          else if (_huboActualizacion)
+            const Padding(
+              padding: EdgeInsets.all(12.0),
+              child: Icon(Icons.cloud_done, color: Colors.white, size: 22),
+            ),
+        ],
       ),
       body: AnimatedOpacity(
         opacity: _opacity,

@@ -31,8 +31,9 @@ class Medley {
 class CrearMedleyPage extends StatefulWidget {
   final CategoriaConfig config;
   final Medley? medley;
-  const CrearMedleyPage({Key? key, required this.config, this.medley}) : super(key: key);
-
+  final List<Song>? canciones; // NUEVO
+  const CrearMedleyPage({Key? key, required this.config, this.medley, this.canciones})
+      : super(key: key);
   @override
   _CrearMedleyPageState createState() => _CrearMedleyPageState();
 }
@@ -109,9 +110,9 @@ class _CrearMedleyPageState extends State<CrearMedleyPage> {
             ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: widget.config.cancionesCompletas.length,
+              itemCount: (widget.canciones ?? widget.config.cancionesCompletas).length,
               itemBuilder: (context, index) {
-                Song song = widget.config.cancionesCompletas[index];
+                Song song = (widget.canciones ?? widget.config.cancionesCompletas)[index];
                 bool isSelected = _selectedSongs.contains(song.title.toUpperCase());
                 return CheckboxListTile(
                   title: Text(song.title),
@@ -166,19 +167,24 @@ class _CrearMedleyPageState extends State<CrearMedleyPage> {
 class MedleyDetailPage extends StatelessWidget {
   final CategoriaConfig config;
   final Medley medley;
-  const MedleyDetailPage({Key? key, required this.config, required this.medley}) : super(key: key);
+  final List<Song>? canciones; // NUEVO
+  const MedleyDetailPage({
+    Key? key,
+    required this.config,
+    required this.medley,
+    this.canciones,
+  }) : super(key: key);
 
   List<Song> getSongsForMedley() {
     List<Song> medleySongs = [];
+    final fuente = canciones ?? config.cancionesCompletas; // CAMBIÓ
     for (var title in medley.canciones) {
       try {
-        Song song = config.cancionesCompletas.firstWhere(
+        Song song = fuente.firstWhere(
           (s) => s.title.toUpperCase() == title.toUpperCase(),
         );
         medleySongs.add(song);
-      } catch (e) {
-        // Ignorar si no se encuentra.
-      }
+      } catch (e) {}
     }
     return medleySongs;
   }
