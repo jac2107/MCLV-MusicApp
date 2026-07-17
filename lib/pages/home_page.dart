@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../utils/launch_url.dart';
+import '../utils/app_theme.dart';
 import '../notifications_page.dart';
 import 'feedback_page.dart';
 import 'para_mejorar_page.dart';
@@ -11,103 +12,116 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.cream,
       body: Stack(
         children: [
+          // Fondo superior curvo con degradado cálido
           Container(
-            width: double.infinity,
-            height: double.infinity,
+            height: 340,
             decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFF0D1B2A), Color(0xFF1B263B)],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
-            ),
-            child: SafeArea(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 0),
-                  SizedBox(
-                    height: 160,
-                    child: CircleAvatar(
-                      radius: 80,
-                      backgroundColor: Colors.white,
-                      backgroundImage: AssetImage('assets/image.png'),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Misión Cristiana\nLuz de Vida',
-                    style: TextStyle(
-                      fontSize: 45,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 30),
-                  _buildPhysicsButton(
-                    context,
-                    'Adoraciones',
-                    Icons.music_note,
-                    CategoriaPage(config: categoriaAdoracion),
-                    _adoracionesHoverNotifier,
-                  ),
-                  const SizedBox(height: 15),
-                  _buildPhysicsButton(
-                    context,
-                    'Alabanzas',
-                    Icons.headset,
-                    CategoriaPage(config: categoriaAlabanza),
-                    _alabanzasHoverNotifier,
-                  ),
-                  const SizedBox(height: 15),
-                  _buildPhysicsButton(
-                    context,
-                    'Para mejorar',
-                    Icons.favorite,
-                    const ParaMejorarPage(),
-                    _paraMejorarHoverNotifier,
-                  ),
-                  const SizedBox(height: 30),
-                  _BouncingIconsRow(),
-                  const SizedBox(height: 20),
-                ],
+              gradient: AppColors.warmGradient,
+              borderRadius: BorderRadius.only(
+                bottomLeft: Radius.circular(48),
+                bottomRight: Radius.circular(48),
               ),
             ),
           ),
           SafeArea(
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: IconButton(
-                  icon: const Icon(Icons.notifications, color: Colors.white, size: 30),
-                  onPressed: () {
-                    Navigator.push(
+            child: Column(
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.gold, width: 3),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.gold.withOpacity(0.3),
+                        blurRadius: 24,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: Image.asset('assets/image.png', fit: BoxFit.cover),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Misión Cristiana\nLuz de Vida',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.cream,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 28),
+                    child: Column(
+                      children: [
+                        _CategoryCard(
+                          title: 'Adoraciones',
+                          subtitle: 'Momentos de intimidad',
+                          icon: Icons.self_improvement,
+                          gradient: AppColors.blueGradient,
+                          page: CategoriaPage(config: categoriaAdoracion),
+                        ),
+                        const SizedBox(height: 18),
+                        _CategoryCard(
+                          title: 'Alabanzas',
+                          subtitle: 'Celebra con gozo',
+                          icon: Icons.celebration,
+                          gradient: AppColors.goldGradient,
+                          page: CategoriaPage(config: categoriaAlabanza),
+                        ),
+                        const SizedBox(height: 18),
+                        _CategoryCard(
+                          title: 'Para mejorar',
+                          subtitle: 'Ayúdanos a crecer',
+                          icon: Icons.favorite_rounded,
+                          gradient: const LinearGradient(
+                            colors: [AppColors.softBlueGray, AppColors.steelBlueLight],
+                          ),
+                          page: const ParaMejorarPage(),
+                          darkText: true,
+                        ),
+                        const SizedBox(height: 28),
+                        const _SocialRow(),
+                        const SizedBox(height: 24),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _RoundIconButton(
+                    icon: Icons.notifications_none_rounded,
+                    onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (context) => const NotificationsPage()),
-                    );
-                  },
-                ),
-              ),
-            ),
-          ),
-          SafeArea(
-            child: Align(
-              alignment: Alignment.topRight,
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: IconButton(
-                  icon: const Icon(Icons.feedback, color: Colors.white, size: 30),
-                  onPressed: () {
-                    Navigator.push(
+                    ),
+                  ),
+                  _RoundIconButton(
+                    icon: Icons.chat_bubble_outline_rounded,
+                    onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (context) => const FeedbackPage()),
-                    );
-                  },
-                ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -115,144 +129,175 @@ class HomePage extends StatelessWidget {
       ),
     );
   }
+}
 
-  Widget _buildPhysicsButton(BuildContext context, String title, IconData icon,
-      Widget page, ValueNotifier<bool> hoverNotifier) {
-    return GestureDetector(
-      onTapDown: (_) => hoverNotifier.value = true,
-      onTapUp: (_) => hoverNotifier.value = false,
-      onTapCancel: () => hoverNotifier.value = false,
-      child: ValueListenableBuilder(
-        valueListenable: hoverNotifier,
-        builder: (context, isHovered, child) {
-          return AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-            transform: Matrix4.identity()..scale(isHovered ? 1.08 : 1.0),
-            decoration: BoxDecoration(
-              color: const Color(0xFFB8860B),
-              borderRadius: BorderRadius.circular(9),
-              boxShadow: isHovered
-                  ? [
-                      BoxShadow(
-                        color: Colors.orangeAccent.withOpacity(0.6),
-                        blurRadius: 15,
-                        spreadRadius: 3,
-                        offset: const Offset(0, 6),
-                      ),
-                    ]
-                  : [],
-            ),
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.transparent,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shadowColor: Colors.transparent,
-                minimumSize: const Size(265, 65),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(9),
-                ),
-              ),
-              onPressed: () {
-                if (page is CategoriaPage) {
-                  Navigator.push(
-                    context,
-                    PageRouteBuilder(
-                      transitionDuration: const Duration(milliseconds: 500),
-                      pageBuilder: (context, animation, secondaryAnimation) => page,
-                      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-                        return FadeTransition(opacity: animation, child: child);
-                      },
-                    ),
-                  );
-                } else {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => page),
-                  );
-                }
-              },
-              icon: Icon(icon, size: 28),
-              label: Text(
-                title,
-                style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
-              ),
-            ),
-          );
-        },
+class _RoundIconButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  const _RoundIconButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white.withOpacity(0.15),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(10.0),
+          child: Icon(icon, color: AppColors.cream, size: 24),
+        ),
       ),
     );
   }
-
-  static final ValueNotifier<bool> _adoracionesHoverNotifier = ValueNotifier(false);
-  static final ValueNotifier<bool> _alabanzasHoverNotifier = ValueNotifier(false);
-  static final ValueNotifier<bool> _paraMejorarHoverNotifier = ValueNotifier(false);
 }
 
-class _BouncingIconsRow extends StatefulWidget {
-  const _BouncingIconsRow({super.key});
+class _CategoryCard extends StatefulWidget {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Gradient gradient;
+  final Widget page;
+  final bool darkText;
+
+  const _CategoryCard({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.gradient,
+    required this.page,
+    this.darkText = false,
+  });
 
   @override
-  State<_BouncingIconsRow> createState() => _BouncingIconsRowState();
+  State<_CategoryCard> createState() => _CategoryCardState();
 }
 
-class _BouncingIconsRowState extends State<_BouncingIconsRow>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-  late final Animation<double> _animation;
+class _CategoryCardState extends State<_CategoryCard> {
+  double _scale = 1.0;
 
   @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(seconds: 2),
-      vsync: this,
-    )..repeat(reverse: true);
-
-    _animation = Tween<double>(begin: 0, end: 10).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Widget _buildIcon(String asset, String url) {
+  Widget build(BuildContext context) {
+    final textColor = widget.darkText ? AppColors.charcoal : Colors.white;
     return GestureDetector(
-      onTap: () => launchExternalUrl(url),
-      child: AnimatedBuilder(
-        animation: _animation,
-        builder: (context, child) {
-          return Transform.translate(
-            offset: Offset(0, -_animation.value),
-            child: child,
-          );
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Image.asset(
-            asset,
-            width: 40,
-            height: 40,
+      onTapDown: (_) => setState(() => _scale = 0.97),
+      onTapUp: (_) => setState(() => _scale = 1.0),
+      onTapCancel: () => setState(() => _scale = 1.0),
+      onTap: () {
+        Navigator.push(
+          context,
+          PageRouteBuilder(
+            transitionDuration: const Duration(milliseconds: 400),
+            pageBuilder: (context, animation, secondaryAnimation) => widget.page,
+            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+          ),
+        );
+      },
+      child: AnimatedScale(
+        scale: _scale,
+        duration: const Duration(milliseconds: 120),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            gradient: widget.gradient,
+            borderRadius: BorderRadius.circular(AppShapes.radiusLg),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.charcoal.withOpacity(0.12),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.25),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(widget.icon, color: textColor, size: 26),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.title,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.subtitle,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: textColor.withOpacity(0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.arrow_forward_ios_rounded, color: textColor.withOpacity(0.7), size: 18),
+            ],
           ),
         ),
       ),
     );
   }
+}
+
+class _SocialRow extends StatelessWidget {
+  const _SocialRow();
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        _buildIcon('assets/Facebook.png', 'https://m.facebook.com/mision.cristiana.luz.de.vida/'),
-        _buildIcon('assets/youtube1.png', 'https://www.youtube.com/@misioncristianaluzdevida'),
-        _buildIcon('assets/Google.png', 'https://sites.google.com/view/mvcl/p%C3%A1gina-principal'),
+        _SocialIcon(asset: 'assets/Facebook.png', url: 'https://m.facebook.com/mision.cristiana.luz.de.vida/'),
+        const SizedBox(width: 20),
+        _SocialIcon(asset: 'assets/youtube1.png', url: 'https://www.youtube.com/@misioncristianaluzdevida'),
+        const SizedBox(width: 20),
+        _SocialIcon(asset: 'assets/Google.png', url: 'https://sites.google.com/view/mvcl/p%C3%A1gina-principal'),
       ],
+    );
+  }
+}
+
+class _SocialIcon extends StatelessWidget {
+  final String asset;
+  final String url;
+  const _SocialIcon({required this.asset, required this.url});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => launchExternalUrl(url),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.charcoal.withOpacity(0.08),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Image.asset(asset, width: 26, height: 26),
+      ),
     );
   }
 }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
-import 'dart:math';
 import 'home_page.dart';
+import '../utils/app_theme.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -13,31 +13,34 @@ class SplashScreen extends StatefulWidget {
 class SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<double> _opacityAnimation;
-  late Animation<double> _starAnimation;
+  late Animation<double> _fadeAnimation;
+  late Animation<double> _scaleAnimation;
 
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(seconds: 15),
+      duration: const Duration(milliseconds: 1400),
       vsync: this,
     );
 
-    _opacityAnimation = Tween<double>(begin: 0, end: 15).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
-
-    _starAnimation = Tween<double>(begin: 0, end: 0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.linear),
+    _fadeAnimation = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _scaleAnimation = Tween<double>(begin: 0.85, end: 1.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
     );
 
     _controller.forward();
 
-    Timer(const Duration(seconds: 3), () {
+    Timer(const Duration(milliseconds: 2200), () {
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const HomePage()),
+        PageRouteBuilder(
+          transitionDuration: const Duration(milliseconds: 600),
+          pageBuilder: (context, animation, secondaryAnimation) => const HomePage(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
       );
     });
   }
@@ -51,59 +54,63 @@ class SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1B2A),
-      body: Stack(
-        children: [
-          AnimatedBuilder(
-            animation: _starAnimation,
-            builder: (context, child) {
-              return CustomPaint(
-                painter: StarPainter(_starAnimation.value),
-                child: Container(),
-              );
-            },
-          ),
-          Center(
-            child: FadeTransition(
-              opacity: _opacityAnimation,
-              child: const Text(
-                'MusicApp\nM.C.L.V',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 56,
-                  fontWeight: FontWeight.bold,
-                  fontFamily: 'Cinzel',
-                  color: Colors.white,
-                  letterSpacing: 2,
-                ),
+      body: Container(
+        decoration: const BoxDecoration(gradient: AppColors.warmGradient),
+        child: Center(
+          child: FadeTransition(
+            opacity: _fadeAnimation,
+            child: ScaleTransition(
+              scale: _scaleAnimation,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 140,
+                    height: 140,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: AppColors.goldGradient,
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.gold.withOpacity(0.4),
+                          blurRadius: 40,
+                          spreadRadius: 4,
+                        ),
+                      ],
+                    ),
+                    child: ClipOval(
+                      child: Image.asset(
+                        'assets/image.png',
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  const Text(
+                    'M.C.L.V',
+                    style: TextStyle(
+                      fontSize: 40,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.cream,
+                      letterSpacing: 6,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'MUSIC APP',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.goldLight,
+                      letterSpacing: 4,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
-}
-
-class StarPainter extends CustomPainter {
-  final double offsetY;
-
-  StarPainter(this.offsetY);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withOpacity(0.8)
-      ..style = PaintingStyle.fill;
-
-    final Random random = Random();
-    for (int i = 0; i < 10; i++) {
-      final double x = random.nextDouble() * size.width;
-      final double y = (random.nextDouble() * size.height) + offsetY;
-      canvas.drawCircle(Offset(x, y), 2, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

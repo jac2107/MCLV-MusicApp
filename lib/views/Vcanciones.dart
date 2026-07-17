@@ -11,7 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-
+import '../utils/app_theme.dart';
 class Vcanciones extends StatefulWidget {
   final Song cancion;
 
@@ -362,8 +362,13 @@ class _VcancionesState extends State<Vcanciones> {
           const SizedBox(height: 12),
           ElevatedButton.icon(
             onPressed: _retryConnection,
-            icon: const Icon(Icons.refresh, size: 18),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
             label: const Text('Reintentar'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.gold,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppShapes.radiusSm)),
+            ),
           ),
         ],
       ),
@@ -711,19 +716,22 @@ class _VcancionesState extends State<Vcanciones> {
     });
   }
 
-  Widget _buildMenuItem({required IconData icon, required String title, required VoidCallback onTap}) {
-    return ListTile(
-      leading: Icon(icon, color: Colors.white),
+Widget _buildMenuItem({required IconData icon, required String title, required VoidCallback onTap}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    child: ListTile(
+      leading: Icon(icon, color: AppColors.goldLight),
       title: Text(
         title,
-        style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w500),
+        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
       ),
       onTap: onTap,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      tileColor: Colors.white10,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 5),
-    );
-  }
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppShapes.radiusSm)),
+      tileColor: Colors.white.withOpacity(0.08),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+    ),
+  );
+}
 
   void _selectInstrument(String instrument) {
     setState(() {
@@ -775,7 +783,7 @@ class _VcancionesState extends State<Vcanciones> {
           bool hasThumbnail = thumbnailPath.isNotEmpty && thumbnailPath != 'assets/image.png';
 
           return Scaffold(
-            backgroundColor: Colors.white,
+            backgroundColor: AppColors.cream,
             appBar: AppBar(
               title: Text(
                 widget.cancion.title,
@@ -812,14 +820,9 @@ class _VcancionesState extends State<Vcanciones> {
                           Positioned.fill(
                             child: Container(
                               decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    Colors.transparent,
-                                    Colors.black.withOpacity(0.7),
-                                  ],
-                                ),
+                                color: AppColors.goldLight.withOpacity(0.18),
+                                borderRadius: BorderRadius.circular(AppShapes.radiusMd),
+                                border: Border.all(color: AppColors.gold.withOpacity(0.4)),
                               ),
                             ),
                           ),
@@ -966,7 +969,7 @@ class _VcancionesState extends State<Vcanciones> {
                                           end: Alignment.bottomCenter,
                                           colors: [
                                             Colors.transparent,
-                                            Colors.black.withOpacity(0.5),
+                                            AppColors.charcoal.withOpacity(0.75),
                                           ],
                                         ),
                                       ),
@@ -996,12 +999,15 @@ class _VcancionesState extends State<Vcanciones> {
                                             });
                                           },
                                           style: ElevatedButton.styleFrom(
-                                            backgroundColor: accentColor ?? Colors.grey,
+                                            backgroundColor: accentColor ?? AppColors.steelBlue,
                                             foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppShapes.radiusMd)),
+                                            elevation: 0,
                                           ),
                                           child: Text(
                                             isMultitrackVisible ? "OCULTAR" : "MULTITRACK",
-                                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, letterSpacing: 0.5),
                                           ),
                                         ),
                                       const SizedBox(height: 10),
@@ -1220,8 +1226,12 @@ class _VcancionesState extends State<Vcanciones> {
             ),
             floatingActionButton: FloatingActionButton(
               onPressed: toggleAutoscroll,
-              child: Icon(isAutoscrollActive ? Icons.pause : Icons.play_arrow),
-              backgroundColor: isAutoscrollActive ? secondaryColor ?? const Color.fromARGB(255, 50, 86, 151) : Colors.white,
+              backgroundColor: isAutoscrollActive ? (secondaryColor ?? AppColors.gold) : Colors.white,
+              elevation: 4,
+              child: Icon(
+                isAutoscrollActive ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                color: isAutoscrollActive ? Colors.white : (primaryColor ?? AppColors.charcoal),
+              ),
             ),
           );
         }
@@ -1229,28 +1239,32 @@ class _VcancionesState extends State<Vcanciones> {
     );
   }
 
-  Widget _buildSpeedButton(String text, double speed) {
+Widget _buildSpeedButton(String text, double speed) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: InkWell(
         onTap: () => setScrollSpeed(speed),
         borderRadius: BorderRadius.circular(50),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: scrollSpeed == speed ? secondaryColor ?? const Color.fromARGB(255, 42, 69, 118) : Colors.grey,
+            color: scrollSpeed == speed ? (secondaryColor ?? AppColors.gold) : AppColors.softBlueGray,
             borderRadius: BorderRadius.circular(80),
           ),
           child: Text(
             text,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: scrollSpeed == speed ? Colors.white : AppColors.charcoal,
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildTransposeButton(String label, int semiTones, {bool isReset = false}) {
+Widget _buildTransposeButton(String label, int semiTones, {bool isReset = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: InkWell(
@@ -1263,14 +1277,18 @@ class _VcancionesState extends State<Vcanciones> {
         },
         borderRadius: BorderRadius.circular(500),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: const Color(0x00000000),
+            color: isReset ? AppColors.softBlueGray : (accentColor ?? AppColors.steelBlue).withOpacity(0.12),
             borderRadius: BorderRadius.circular(50),
           ),
           child: Text(
             label,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black),
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: accentColor ?? AppColors.charcoal,
+            ),
           ),
         ),
       ),
@@ -1344,12 +1362,12 @@ class _InstrumentYoutubePlayerState extends State<_InstrumentYoutubePlayer> {
         width: double.infinity,
         padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
         decoration: BoxDecoration(
-          color: Colors.grey[200],
-          borderRadius: BorderRadius.circular(8),
-        ),
+        color: AppColors.softBlueGray.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(AppShapes.radiusMd),
+      ),
         child: Column(
           children: [
-            const Icon(Icons.videocam_off, size: 40, color: Colors.grey),
+            Icon(Icons.videocam_off_rounded, size: 40, color: AppColors.steelBlue),
             const SizedBox(height: 8),
             const Text(
               'Este video ya no está disponible.',
