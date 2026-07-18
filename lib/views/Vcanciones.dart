@@ -12,6 +12,11 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../utils/app_theme.dart';
+import '../utils/song_pdf_generator.dart';
+import '../pages/song_picker_page.dart';
+import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
+import '../models/favorites_repository.dart';
 class Vcanciones extends StatefulWidget {
   final Song cancion;
 
@@ -42,7 +47,7 @@ class _VcancionesState extends State<Vcanciones> {
   bool isAutoscrollActive = false;
   bool showSpeedOptions = false;
   double scrollSpeed = 1.0;
-
+  bool _isFavorite = false;
   YoutubePlayerController? _multitrackController;
   YoutubePlayerController? _youtubeController;
 
@@ -76,7 +81,8 @@ class _VcancionesState extends State<Vcanciones> {
   void initState() {
     super.initState();
     _checkConnectionAndInit();
-
+_loadFavoriteState();
+FavoritesRepository.instance.registerSongOpened(widget.cancion.title);
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) {
         setState(() {
@@ -107,7 +113,30 @@ class _VcancionesState extends State<Vcanciones> {
       _initializeYoutubeControllers();
     }
   }
+Future<void> _loadFavoriteState() async {
+  final fav = await FavoritesRepository.instance.isFavorite(widget.cancion.title);
+  if (!mounted) return;
+  setState(() {
+    _isFavorite = fav;
+  });
+}
 
+Future<void> _toggleFavorite() async {
+  final nowFavorite =
+      await FavoritesRepository.instance.toggleFavorite(widget.cancion.title);
+  if (!mounted) return;
+  setState(() {
+    _isFavorite = nowFavorite;
+  });
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        nowFavorite ? 'Agregada a favoritos' : 'Quitada de favoritos',
+      ),
+      duration: const Duration(seconds: 1),
+    ),
+  );
+}
   Future<bool> _checkConnection() async {
     try {
       final List<ConnectivityResult> results = await Connectivity().checkConnectivity();
@@ -473,6 +502,7 @@ static const int _thumbnailCacheVersion = 2; // súbelo cuando cambies la calida
     _multitrackController?.dispose();
     _youtubeController?.dispose();
     _scrollController.dispose();
+    _tituloPdfController.dispose();
     super.dispose();
   }
 
@@ -733,6 +763,139 @@ Widget _buildMenuItem({required IconData icon, required String title, required V
   );
 }
 
+  Future<void> _compartirCancion() async {
+    // Paso 1: ¿solo esta canción, o armar una selección con varias?
+    final alcance = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.music_note_outlined),
+              title: const Text('Solo esta canción'),
+              onTap: () => Navigator.pop(context, 'sola'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.playlist_add_check_outlined),
+              title: const Text('Elegir varias canciones'),
+              onTap: () => Navigator.pop(context, 'varias'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (alcance == null || !mounted) return;
+
+    if (alcance == 'varias') {
+      // Va al selector con esta canción ya pre-marcada.
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => SongPickerPage(
+            preseleccionadas: [widget.cancion],
+          ),
+        ),
+      );
+      return;
+    }
+
+    // alcance == 'sola': preguntamos formato y, si es PDF, un título opcional
+    final formato = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf_outlined),
+              title: const Text('Compartir como PDF'),
+              onTap: () => Navigator.pop(context, 'pdf'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.text_snippet_outlined),
+              title: const Text('Compartir como texto'),
+              onTap: () => Navigator.pop(context, 'texto'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (formato == null || !mounted) return;
+
+    if (formato == 'texto') {
+      final buffer = StringBuffer();
+      buffer.writeln(widget.cancion.title);
+      buffer.writeln('Tonalidad: ${widget.cancion.tonalidad}');
+      if (widget.cancion.tiempo > 0) {
+        buffer.writeln('Tiempo: ${widget.cancion.tiempo} bpm');
+      }
+      buffer.writeln();
+      buffer.write(widget.cancion.text.trim());
+      await Share.share(buffer.toString());
+      return;
+    }
+
+    // formato == 'pdf': título opcional (para eventos, ej. "Servicio Domingo")
+    final titulo = await _pedirTituloPdf();
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      final esAlabanza = widget.cancion.categoria == 'alabanza';
+      final bytes = await SongPdfGenerator.generate(
+        adoracion: esAlabanza ? [] : [widget.cancion],
+        alabanza: esAlabanza ? [widget.cancion] : [],
+        tituloRepertorio: titulo,
+      );
+      if (!mounted) return;
+      Navigator.pop(context); // cierra el loading
+      final nombreArchivo =
+          '${widget.cancion.title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9 ]'), '').replaceAll(' ', '_')}.pdf';
+      await Printing.sharePdf(bytes: bytes, filename: nombreArchivo);
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo generar el PDF: $e')),
+        );
+      }
+    }
+  }
+
+  final TextEditingController _tituloPdfController = TextEditingController();
+
+  /// Pide un título opcional para el PDF (ej. nombre del evento).
+  /// Devuelve null si el usuario cancela; string vacío o con texto si continúa.
+  Future<String?> _pedirTituloPdf() async {
+    _tituloPdfController.clear();
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Título del PDF (opcional)'),
+        content: TextField(
+          controller: _tituloPdfController,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Ej: Servicio Domingo'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, null),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, _tituloPdfController.text.trim()),
+            child: const Text('Continuar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _selectInstrument(String instrument) {
     setState(() {
       showInstrumentLinks = true;
@@ -792,6 +955,19 @@ Widget _buildMenuItem({required IconData icon, required String title, required V
               backgroundColor: primaryColor ?? const Color(0xFF1B263B),
               foregroundColor: Colors.white,
               actions: [
+                IconButton(
+                  icon: const Icon(Icons.ios_share_rounded, color: Colors.white),
+                  onPressed: _compartirCancion,
+                  tooltip: 'Compartir / PDF',
+                ),
+                IconButton(
+                  icon: Icon(
+                    _isFavorite ? Icons.favorite : Icons.favorite_border,
+                    color: _isFavorite ? Colors.redAccent : Colors.white,
+                  ),
+                  onPressed: _toggleFavorite,
+                  tooltip: _isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos',
+                ),
                 if (widget.cancion.instrument != 0)
                   Builder(
                     builder: (BuildContext context) {

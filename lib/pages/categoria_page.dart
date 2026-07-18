@@ -516,7 +516,7 @@ class _CategoriaPageState extends State<CategoriaPage> {
             pinned: true,
             backgroundColor: config.primaryColor,
             flexibleSpace: FlexibleSpaceBar(
-              titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
+              titlePadding: const EdgeInsets.only(left: 56, bottom: 16, right: 16),
               title: Text(config.appBarTitle, style: const TextStyle(fontWeight: FontWeight.w700)),
               background: Container(decoration: BoxDecoration(gradient: config.gradient)),
             ),

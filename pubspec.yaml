@@ -32,6 +32,8 @@ dependencies:
   connectivity_plus: ^6.0.5
   http: ^1.3.0
   share_plus: ^10.0.0   # para el botón de compartir
+  pdf: ^3.11.1          # generar el PDF de canciones/medleys
+  printing: ^5.13.3     # vista previa e impartir el PDF generado
 
 
 dev_dependencies:

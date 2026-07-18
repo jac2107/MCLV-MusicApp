@@ -5,6 +5,8 @@ import '../notifications_page.dart';
 import 'feedback_page.dart';
 import 'para_mejorar_page.dart';
 import 'categoria_page.dart';
+import 'song_picker_page.dart';
+import 'favoritos_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -13,11 +15,17 @@ class HomePage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.cream,
-      body: Stack(
+      body: Column(
         children: [
-          // Fondo superior curvo con degradado cálido
+          // Fondo superior curvo con degradado cálido.
+          // Antes: altura fija (340) más CORTA que el contenido real
+          // (logo + título + fila de iconos en un Stack por encima), así
+          // que el botón de compartir terminaba superpuesto justo sobre el
+          // logo. Ahora todo el bloque superior (iconos + logo + título)
+          // vive DENTRO de este mismo Container, uno debajo del otro en una
+          // Column normal, así el fondo siempre mide lo que su contenido
+          // necesita y nada se solapa.
           Container(
-            height: 340,
             decoration: const BoxDecoration(
               gradient: AppColors.warmGradient,
               borderRadius: BorderRadius.only(
@@ -25,99 +33,126 @@ class HomePage extends StatelessWidget {
                 bottomRight: Radius.circular(48),
               ),
             ),
-          ),
-          SafeArea(
-            child: Column(
-              children: [
-                const SizedBox(height: 12),
-                Container(
-                  width: 120,
-                  height: 120,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.gold, width: 3),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.gold.withOpacity(0.3),
-                        blurRadius: 24,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: Image.asset('assets/image.png', fit: BoxFit.cover),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                const Text(
-                  'Misión Cristiana\nLuz de Vida',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.cream,
-                    height: 1.25,
-                  ),
-                ),
-                const SizedBox(height: 32),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 28),
-                    child: Column(
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 28),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        _CategoryCard(
-                          title: 'Adoraciones',
-                          icon: Icons.piano_rounded,
-                          gradient: AppColors.blueGradient,
-                          page: CategoriaPage(config: categoriaAdoracion),
-                        ),
-                        const SizedBox(height: 18),
-                        _CategoryCard(
-                          title: 'Alabanzas',
-                          icon: Icons.celebration,
-                          gradient: AppColors.goldGradient,
-                          page: CategoriaPage(config: categoriaAlabanza),
-                        ),
-                        const SizedBox(height: 18),
-                        _CategoryCard(
-                          title: 'Para mejorar',
-                          icon: Icons.favorite_rounded,
-                          gradient: const LinearGradient(
-                            colors: [AppColors.softBlueGray, AppColors.steelBlueLight],
+                        _RoundIconButton(
+                          icon: Icons.notifications_none_rounded,
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (context) => const NotificationsPage()),
                           ),
-                          page: const ParaMejorarPage(),
-                          darkText: true,
                         ),
-                        const SizedBox(height: 28),
-                        const _SocialRow(),
-                        const SizedBox(height: 24),
+                        Row(
+                          children: [
+                            _RoundIconButton(
+                              icon: Icons.ios_share_rounded,
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => const SongPickerPage()),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            _RoundIconButton(
+                              icon: Icons.favorite_border_rounded,
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => const FavoritosPage()),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            _RoundIconButton(
+                              icon: Icons.chat_bubble_outline_rounded,
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => const FeedbackPage()),
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
-                  ),
+                    const SizedBox(height: 20),
+                    Container(
+                      width: 120,
+                      height: 120,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.gold, width: 3),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.gold.withOpacity(0.3),
+                            blurRadius: 24,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: ClipOval(
+                        child: Image.asset('assets/image.png', fit: BoxFit.cover),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'Misión Cristiana\nLuz de Vida',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.cream,
+                        height: 1.25,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // El resto del contenido (tarjetas + redes sociales) ya no vive en
+          // un Stack aparte "adivinando" cuánto espacio dejar: simplemente
+          // sigue debajo del fondo curvo dentro de la misma Column.
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
+              child: Column(
                 children: [
-                  _RoundIconButton(
-                    icon: Icons.notifications_none_rounded,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const NotificationsPage()),
-                    ),
+                  _CategoryCard(
+                    title: 'Adoraciones',
+                    icon: Icons.piano_rounded,
+                    gradient: AppColors.blueGradient,
+                    page: CategoriaPage(config: categoriaAdoracion),
                   ),
-                  _RoundIconButton(
-                    icon: Icons.chat_bubble_outline_rounded,
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const FeedbackPage()),
+                  const SizedBox(height: 18),
+                  _CategoryCard(
+                    title: 'Alabanzas',
+                    icon: Icons.celebration,
+                    // Antes usaba AppColors.goldGradient (dorado), un color
+                    // totalmente distinto al resto. Ahora las 3 tarjetas
+                    // comparten la misma familia de azules del fondo
+                    // (steelBlueLight/softBlueGray), variando solo la
+                    // intensidad, para sentirse un mismo set y no 3 botones
+                    // de colores sueltos.
+                    gradient: const LinearGradient(
+                      colors: [AppColors.steelBlueLight, AppColors.softBlueGray],
                     ),
+                    page: CategoriaPage(config: categoriaAlabanza),
                   ),
+                  const SizedBox(height: 18),
+                  _CategoryCard(
+                    title: 'Para mejorar',
+                    icon: Icons.favorite_rounded,
+                    gradient: const LinearGradient(
+                      colors: [AppColors.softBlueGray, AppColors.steelBlueLight],
+                    ),
+                    page: const ParaMejorarPage(),
+                  ),
+                  const SizedBox(height: 28),
+                  const _SocialRow(),
                 ],
               ),
             ),
@@ -155,14 +190,12 @@ class _CategoryCard extends StatefulWidget {
   final IconData icon;
   final Gradient gradient;
   final Widget page;
-  final bool darkText;
 
   const _CategoryCard({
     required this.title,
     required this.icon,
     required this.gradient,
     required this.page,
-    this.darkText = false,
   });
 
   @override
@@ -174,7 +207,11 @@ class _CategoryCardState extends State<_CategoryCard> {
 
   @override
   Widget build(BuildContext context) {
-    final textColor = widget.darkText ? AppColors.charcoal : Colors.white;
+    // Texto siempre blanco: ahora que las 3 tarjetas comparten la misma
+    // familia de azules medio-oscuros, el blanco tiene buen contraste en
+    // las 3, así que ya no hace falta la variante darkText de antes.
+    const textColor = Colors.white;
+
     return GestureDetector(
       onTapDown: (_) => setState(() => _scale = 0.97),
       onTapUp: (_) => setState(() => _scale = 1.0),
@@ -222,7 +259,7 @@ class _CategoryCardState extends State<_CategoryCard> {
               Expanded(
                 child: Text(
                   widget.title,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
                     color: textColor,
