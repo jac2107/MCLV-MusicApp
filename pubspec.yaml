@@ -34,7 +34,8 @@ dependencies:
   share_plus: ^10.0.0   # para el botón de compartir
   pdf: ^3.11.1          # generar el PDF de canciones/medleys
   printing: ^5.13.3     # vista previa e impartir el PDF generado
-  flutter_soloud: ^3.3.7
+  native_metronome:
+      path: ./native_metronome
 
 dev_dependencies:
   flutter_test:

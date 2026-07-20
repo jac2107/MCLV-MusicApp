@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:palette_generator/palette_generator.dart';
 import '../models/Mcanciones.dart';
@@ -21,6 +20,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../utils/song_id.dart';
 import '../widgets/enhanced_youtube_player.dart';
 import 'package:flutter_soloud/flutter_soloud.dart';
+import 'package:native_metronome/native_metronome.dart';
 
 class Vcanciones extends StatefulWidget {
   final Song cancion;
@@ -37,13 +37,11 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
   // semana a semana sin dejar crecer el almacenamiento indefinidamente.
   static const int _maxCachedThumbnails = 40;
   static const String _thumbnailOrderKey = 'thumbnail_cache_order';
-  late AudioSource _tickSound;
   late Future<String> _thumbnailFuture;
   bool isMetronomePlaying = false;
   int transposeValue = 0;
   final int originalTransposeValue = 0;
   bool showTransposeButtons = false;
-  final AudioPlayer player = AudioPlayer();
   bool isMultitrackPlaying = false;
   bool isMultitrackVisible = false;
   bool isAutoscrollActive = false;
@@ -81,10 +79,7 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
   bool showInstrumentLinks = false;
   String? currentInstrument;
   String? videoId;
-  bool _metronomeRunning = false;
-  int _intervalMs = 0;
-  late DateTime _metronomeStart;
-  Timer? _metronomeTimer;
+
 
   late final AnimationController _entryController;
   late final Animation<double> _fadeAnimation;
@@ -116,17 +111,9 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
     _loadFavoriteState();
     FavoritesRepository.instance.registerSongOpened(widget.cancion.title);
 
-    player.setSource(AssetSource('sounds/metronome_tick.mp3'));
     _scrollController.addListener(_updateYoutubePlayerVisibility);
-    _initSound();
   }
-  Future<void> _initSound() async {
-    await SoLoud.instance.init();
 
-    _tickSound = await SoLoud.instance.loadAsset(
-      'assets/sounds/metronome_tick.mp3',
-    );
-  }
   Future<void> _checkConnectionAndInit() async {
     final bool hasConnection = await _checkConnection();
     if (!mounted) return;
@@ -543,12 +530,11 @@ Color _ensureContrast(Color color, Color background, {required double minDiff, r
     );
   }
 
-  @override
+@override
 void dispose() {
   _entryController.dispose();
   stopMetronome();
   stopAutoscroll();
-  player.dispose();
   _youtubeController?.removeListener(_onYoutubeValueChanged);
   _multitrackController?.removeListener(_onMultitrackValueChanged);
   _multitrackController?.dispose();
@@ -557,7 +543,6 @@ void dispose() {
   _scrollController.dispose();
   _tituloPdfController.dispose();
   super.dispose();
-  SoLoud.instance.deinit();
 }
   List<TextSpan> parseLyrics(String text, Color chordColor, Color keywordColor, Color textColor) {
     final String _suffix = r'(?:maj7|maj|min|dim7|dim|aug|sus\d*|add\d*|m7|m9|m6|m|[°+])?';
@@ -682,57 +667,17 @@ void dispose() {
     setState(() {
       isMetronomePlaying = !isMetronomePlaying;
       if (isMetronomePlaying) {
-        startMetronome();
-        if (isMultitrackPlaying) {
-          player.resume();
-        }
+        NativeMetronome.start(widget.cancion.tiempo);
       } else {
-        stopMetronome();
-        player.pause();
+        NativeMetronome.stop();
       }
     });
   }
 
-  void startMetronome() {
-    if (widget.cancion.tiempo <= 0) {
-      _metronomeRunning = false;
-      return;
-    }
-    _metronomeRunning = true;
-    _intervalMs = (60000 / widget.cancion.tiempo).round();
-    _metronomeStart = DateTime.now();
-
-    _metronomeTimer?.cancel();
-    _metronomeTimer = Timer.periodic(Duration(milliseconds: _intervalMs), (timer) {
-      if (!_metronomeRunning) {
-        timer.cancel();
-        return;
-      }
-
-      DateTime expectedTickTime = _metronomeStart.add(Duration(milliseconds: timer.tick * _intervalMs));
-      Duration drift = expectedTickTime.difference(DateTime.now());
-
-      if (drift.isNegative) {
-        drift = Duration.zero;
-      }
-
-SoLoud.instance.play(_tickSound);
-
-      if (drift.inMilliseconds.abs() > 10) {
-        _metronomeTimer?.cancel();
-        _metronomeTimer = Timer(Duration(milliseconds: _intervalMs - drift.inMilliseconds), startMetronome);
-      }
-    });
+void stopMetronome() {
+    NativeMetronome.stop();
   }
 
-  void stopMetronome() {
-    _metronomeRunning = false;
-    _metronomeTimer?.cancel();
-  }
-
-  Future<void> playMetronomeSound() async {
-    await player.play(AssetSource('sounds/metronome_tick.mp3'));
-  }
 
   void toggleAutoscroll() {
     setState(() {

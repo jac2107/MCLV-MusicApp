@@ -9,6 +9,7 @@ import 'categoria_page.dart';
 import 'song_picker_page.dart';
 import 'favoritos_page.dart';
 import '../utils/background_painters.dart';
+import 'package:native_metronome/native_metronome.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
