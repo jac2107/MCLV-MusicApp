@@ -14,9 +14,19 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         
+        <!-- CORREGIDO: antes decía "default_channel_id", pero el canal que
+             realmente se crea en notifications_handler.dart (vía
+             createNotificationChannel) se llama "mclv_default_channel".
+             Cuando la app está CERRADA, Android usa este valor del manifest
+             directamente (no pasa por tu código Dart) para decidir en qué
+             canal mostrar la notificación. Si apuntaba a un canal que nunca
+             se creó, la notificación podía descartarse silenciosamente —
+             esto explica por qué funcionaba con la app abierta (ahí sí
+             corre tu Dart y usa el canal correcto) pero no con la app
+             cerrada. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="default_channel_id" />
+            android:value="mclv_default_channel" />
         
         <activity
             android:name=".MainActivity"

@@ -25,6 +25,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:musicapp/firebase_options.dart';
 import 'package:musicapp/models/Mcanciones.dart';
+import 'package:musicapp/utils/song_id.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -47,7 +48,7 @@ class MigrationApp extends StatelessWidget {
 /// Convierte el título en un ID de documento válido y estable.
 /// Firestore no permite '/' en el ID; normalizamos a mayúsculas + trim
 /// para evitar duplicados por diferencias de espacios.
-String slugify(String title) {
+String slugifySongTitle(String title) {
   return title.trim().toUpperCase().replaceAll('/', '-');
 }
 
@@ -88,14 +89,14 @@ class _MigrationScreenState extends State<MigrationScreen> {
       required List<Song> simplificadas,
     }) async {
       final Map<String, Song> simplificadasPorTitulo = {
-        for (final s in simplificadas) slugify(s.title): s,
+        for (final s in simplificadas) slugifySongTitle(s.title): s,
       };
       final Map<String, Song> completasPorTitulo = {
-        for (final c in completas) slugify(c.title): c,
+        for (final c in completas) slugifySongTitle(c.title): c,
       };
 
       for (final completa in completas) {
-        final key = slugify(completa.title);
+        final key = slugifySongTitle(completa.title);
         final simple = simplificadasPorTitulo[key];
         if (simple == null) {
           sinParSimplificada.add('${completa.title} (categoria: $categoria)');
@@ -126,7 +127,7 @@ class _MigrationScreenState extends State<MigrationScreen> {
       }
 
       for (final simple in simplificadas) {
-        final key = slugify(simple.title);
+        final key = slugifySongTitle(simple.title);
         if (!completasPorTitulo.containsKey(key)) {
           sinParCompleta.add('${simple.title} (categoria: $categoria)');
         }

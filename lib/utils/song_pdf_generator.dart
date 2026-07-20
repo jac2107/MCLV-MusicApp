@@ -8,8 +8,18 @@
 // Reutiliza la MISMA lógica de reconocimiento de acordes que Vcanciones.dart
 // (regex de acordes + palabras clave como CORO/VERSO/etc.) para que el PDF
 // se vea consistente con lo que el usuario ve en la app.
+//
+// IMPORTANTE: la letra y los acordes se renderizan con una fuente
+// monoespaciada (Roboto Mono) embebida, la MISMA que usa Vcanciones.dart en
+// la app. Esto es lo que garantiza que el espaciado manual que el usuario
+// calibra (contando espacios entre acordes y sílabas) se vea IGUAL en la
+// app y en el PDF compartido. Si se usara la fuente por defecto del PDF
+// (Helvetica, no monoespaciada) o pesos de fuente distintos (bold vs
+// normal) para acordes vs letra, el alineado se rompería aunque el string
+// guardado en Firebase fuera perfecto.
 
 import 'dart:typed_data';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../models/Mcanciones.dart';
@@ -42,6 +52,17 @@ class SongPdfGenerator {
   static final PdfColor _textColor = PdfColors.black;
   static final PdfColor _titleColor = PdfColor.fromInt(0xFF1B1E23); // charcoal
 
+  // Fuente monoespaciada cacheada tras la primera carga, para no releer el
+  // asset en cada canción cuando se genera un repertorio con varias.
+  static pw.Font? _monoFont;
+
+  static Future<pw.Font> _loadMonoFont() async {
+    if (_monoFont != null) return _monoFont!;
+    final data = await rootBundle.load('assets/fonts/RobotoMono-Regular.ttf');
+    _monoFont = pw.Font.ttf(data);
+    return _monoFont!;
+  }
+
   /// Genera el PDF a partir de canciones ya separadas por categoría.
   /// Muestra portada con índice (Adoración primero, luego Alabanza) si hay
   /// más de una canción en total o si el usuario puso un título de evento.
@@ -50,6 +71,8 @@ class SongPdfGenerator {
     required List<Song> alabanza,
     String? tituloRepertorio, // nombre del evento/repertorio, si aplica
   }) async {
+    final monoFont = await _loadMonoFont();
+
     final doc = pw.Document();
     final todas = [...adoracion, ...alabanza];
     final tieneTitulo = tituloRepertorio != null && tituloRepertorio.trim().isNotEmpty;
@@ -60,7 +83,7 @@ class SongPdfGenerator {
     }
 
     for (final cancion in todas) {
-      doc.addPage(_buildSongPage(cancion));
+      doc.addPage(_buildSongPage(cancion, monoFont));
     }
 
     return doc.save();
@@ -171,7 +194,7 @@ class SongPdfGenerator {
     return widgets;
   }
 
-  static pw.Page _buildSongPage(Song cancion) {
+  static pw.Page _buildSongPage(Song cancion, pw.Font monoFont) {
     return pw.Page(
       pageFormat: PdfPageFormat.a4,
       margin: const pw.EdgeInsets.all(32),
@@ -198,7 +221,7 @@ class SongPdfGenerator {
             pw.SizedBox(height: 4),
             pw.Divider(color: PdfColors.grey400),
             pw.SizedBox(height: 10),
-            pw.RichText(text: _buildLyricsRichText(cancion.text)),
+            pw.RichText(text: _buildLyricsRichText(cancion.text, monoFont)),
           ],
         );
       },
@@ -221,7 +244,12 @@ class SongPdfGenerator {
 
   /// Misma lógica de parseLyrics() de Vcanciones.dart, pero produciendo
   /// TextSpan de `package:pdf` en vez de Flutter.
-  static pw.TextSpan _buildLyricsRichText(String text) {
+  ///
+  /// Todos los spans (texto, acordes, keywords) usan la MISMA fuente
+  /// monoespaciada y el MISMO peso (normal, sin bold) — así el ancho de
+  /// cada carácter es idéntico sin importar el color/rol, que es lo que
+  /// mantiene el alineado calibrado por el usuario.
+  static pw.TextSpan _buildLyricsRichText(String text, pw.Font monoFont) {
     final List<pw.TextSpan> children = [];
 
     for (final line in text.split('\n')) {
@@ -235,7 +263,11 @@ class SongPdfGenerator {
         if (match.start > currentIndex) {
           children.add(pw.TextSpan(
             text: line.substring(currentIndex, match.start),
-            style: pw.TextStyle(fontSize: 10.5, color: _textColor),
+            style: pw.TextStyle(
+              font: monoFont,
+              fontSize: 10.5,
+              color: _textColor,
+            ),
           ));
         }
 
@@ -245,9 +277,11 @@ class SongPdfGenerator {
         children.add(pw.TextSpan(
           text: token,
           style: pw.TextStyle(
+            font: monoFont,
             fontSize: 10.5,
             color: isChord ? _chordColor : _keywordColor,
-            fontWeight: pw.FontWeight.bold,
+            // Sin fontWeight.bold: la negrita cambiaría el ancho de cada
+            // carácter y rompería el alineado calibrado con la app.
           ),
         ));
         currentIndex = match.end;
@@ -256,7 +290,11 @@ class SongPdfGenerator {
       if (currentIndex < line.length) {
         children.add(pw.TextSpan(
           text: line.substring(currentIndex),
-          style: pw.TextStyle(fontSize: 10.5, color: _textColor),
+          style: pw.TextStyle(
+            font: monoFont,
+            fontSize: 10.5,
+            color: _textColor,
+          ),
         ));
       }
       children.add(const pw.TextSpan(text: '\n'));

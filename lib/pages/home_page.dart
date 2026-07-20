@@ -1,161 +1,213 @@
 import 'package:flutter/material.dart';
 import '../utils/launch_url.dart';
 import '../utils/app_theme.dart';
+import '../utils/theme_controller.dart';
 import '../notifications_page.dart';
 import 'feedback_page.dart';
 import 'para_mejorar_page.dart';
 import 'categoria_page.dart';
 import 'song_picker_page.dart';
 import 'favoritos_page.dart';
+import '../utils/background_painters.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // IMPORTANTE: HomePage necesita su PROPIO AnimatedBuilder escuchando a
+    // ThemeController. El AnimatedBuilder de main.dart reconstruye
+    // MaterialApp cuando cambia el tema, pero eso NO garantiza que los
+    // widgets hijos (como HomePage) se reconstruyan también — Flutter no
+    // vuelve a bajar por todo el árbol solo porque el theme cambió, a menos
+    // que algo en ese árbol esté escuchando el cambio explícitamente. Sin
+    // este AnimatedBuilder aquí, `isDark` se calculaba una sola vez al
+    // crear la página y nunca se releía, por eso ni el ícono cambiaba.
+    return AnimatedBuilder(
+      animation: ThemeController.instance,
+      builder: (context, _) {
+        final isDark = ThemeController.instance.isDark(context);
+        return _HomePageContent(isDark: isDark);
+      },
+    );
+  }
+}
+
+class _HomePageContent extends StatelessWidget {
+  final bool isDark;
+  const _HomePageContent({required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    // t.accent: dorado clásico en modo noche (combina con las estrellas),
+    // rosa-dorado en modo día (combina con el nuevo warmGradientLight).
+    final t = AppThemeData.of(context);
+
+    // Fondo: noche (carbón -> azul acero) en oscuro, amanecer rosa-dorado
+    // en claro.
+    final backgroundGradient = isDark ? AppColors.warmGradient : AppColors.warmGradientLight;
+
     return Scaffold(
-      backgroundColor: AppColors.cream,
-      body: Column(
+      backgroundColor: isDark ? AppColors.charcoal : AppColors.cream,
+      body: Stack(
         children: [
-          // Fondo superior curvo con degradado cálido.
-          // Antes: altura fija (340) más CORTA que el contenido real
-          // (logo + título + fila de iconos en un Stack por encima), así
-          // que el botón de compartir terminaba superpuesto justo sobre el
-          // logo. Ahora todo el bloque superior (iconos + logo + título)
-          // vive DENTRO de este mismo Container, uno debajo del otro en una
-          // Column normal, así el fondo siempre mide lo que su contenido
-          // necesita y nada se solapa.
-          Container(
-            decoration: const BoxDecoration(
-              gradient: AppColors.warmGradient,
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(48),
-                bottomRight: Radius.circular(48),
-              ),
+          // Textura de fondo: capa 1 = degradado, capa 2 = estrellas
+          // (noche) u ondas de viento (día), fija detrás de todo el
+          // contenido para que no interfiera con los toques.
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(gradient: backgroundGradient),
             ),
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 28),
-                child: Column(
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _RoundIconButton(
-                          icon: Icons.notifications_none_rounded,
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => const NotificationsPage()),
+          ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: isDark ? const StarsPainter() : const SunsetWavesPainter(),
+            ),
+          ),
+          Column(
+            children: [
+              SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 28),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _RoundIconButton(
+                            icon: Icons.notifications_none_rounded,
+                            isDark: isDark,
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (context) => const NotificationsPage()),
+                            ),
                           ),
-                        ),
-                        Row(
-                          children: [
-                            _RoundIconButton(
-                              icon: Icons.ios_share_rounded,
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (context) => const SongPickerPage()),
+                          Row(
+                            children: [
+                              _RoundIconButton(
+                                icon: Icons.ios_share_rounded,
+                                isDark: isDark,
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (context) => const SongPickerPage()),
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 10),
-                            _RoundIconButton(
-                              icon: Icons.favorite_border_rounded,
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (context) => const FavoritosPage()),
+                              const SizedBox(width: 10),
+                              _RoundIconButton(
+                                icon: Icons.favorite_border_rounded,
+                                isDark: isDark,
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (context) => const FavoritosPage()),
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 10),
-                            _RoundIconButton(
-                              icon: Icons.chat_bubble_outline_rounded,
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (context) => const FeedbackPage()),
+                              const SizedBox(width: 10),
+                              _RoundIconButton(
+                                icon: Icons.chat_bubble_outline_rounded,
+                                isDark: isDark,
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(builder: (context) => const FeedbackPage()),
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    Container(
-                      width: 120,
-                      height: 120,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppColors.gold, width: 3),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.gold.withOpacity(0.3),
-                            blurRadius: 24,
-                            spreadRadius: 2,
+                              const SizedBox(width: 10),
+                              // Toque simple: fuerza manualmente claro/oscuro.
+                              // Presión larga: vuelve al modo automático por
+                              // hora (6:00–18:00 claro, resto oscuro).
+                              GestureDetector(
+                                onLongPress: () async {
+                                  await ThemeController.instance.resetToAuto();
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Modo automático activado (según la hora del día)'),
+                                        duration: Duration(seconds: 2),
+                                      ),
+                                    );
+                                  }
+                                },
+                                child: _RoundIconButton(
+                                  icon: isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                                  isDark: isDark,
+                                  onTap: () => ThemeController.instance.toggle(context),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                      child: ClipOval(
-                        child: Image.asset('assets/image.png', fit: BoxFit.cover),
+                      const SizedBox(height: 20),
+                      Container(
+                        width: 120,
+                        height: 120,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: t.accent, width: 3),
+                          boxShadow: [
+                            BoxShadow(
+                              color: t.accent.withOpacity(0.3),
+                              blurRadius: 24,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                        child: ClipOval(
+                          child: Image.asset('assets/image.png', fit: BoxFit.cover),
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 18),
-                    const Text(
-                      'Misión Cristiana\nLuz de Vida',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.cream,
-                        height: 1.25,
+                      const SizedBox(height: 18),
+                      Text(
+                        'Misión Cristiana\nLuz de Vida',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.w700,
+                          // En modo claro, sobre un fondo dorado/claro el
+                          // texto crema casi no se lee — usa carbón ahí.
+                          color: isDark ? AppColors.cream : AppColors.charcoal,
+                          height: 1.25,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ),
-          // El resto del contenido (tarjetas + redes sociales) ya no vive en
-          // un Stack aparte "adivinando" cuánto espacio dejar: simplemente
-          // sigue debajo del fondo curvo dentro de la misma Column.
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
-              child: Column(
-                children: [
-                  _CategoryCard(
-                    title: 'Adoraciones',
-                    icon: Icons.piano_rounded,
-                    gradient: AppColors.blueGradient,
-                    page: CategoriaPage(config: categoriaAdoracion),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
+                  child: Column(
+                    children: [
+                      _CategoryCard(
+                        title: 'Adoraciones',
+                        icon: Icons.piano_rounded,
+                        accentColor: t.accent,
+                        page: CategoriaPage(config: categoriaAdoracion),
+                        isDark: isDark,
+                      ),
+                      const SizedBox(height: 18),
+                      _CategoryCard(
+                        title: 'Alabanzas',
+                        icon: Icons.celebration,
+                        accentColor: t.accent,
+                        page: CategoriaPage(config: categoriaAlabanza),
+                        isDark: isDark,
+                      ),
+                      const SizedBox(height: 18),
+                      _CategoryCard(
+                        title: 'Para mejorar',
+                        icon: Icons.favorite_rounded,
+                        accentColor: t.accent,
+                        page: const ParaMejorarPage(),
+                        isDark: isDark,
+                      ),
+                      const SizedBox(height: 28),
+                      _SocialRow(isDark: isDark),
+                    ],
                   ),
-                  const SizedBox(height: 18),
-                  _CategoryCard(
-                    title: 'Alabanzas',
-                    icon: Icons.celebration,
-                    // Antes usaba AppColors.goldGradient (dorado), un color
-                    // totalmente distinto al resto. Ahora las 3 tarjetas
-                    // comparten la misma familia de azules del fondo
-                    // (steelBlueLight/softBlueGray), variando solo la
-                    // intensidad, para sentirse un mismo set y no 3 botones
-                    // de colores sueltos.
-                    gradient: const LinearGradient(
-                      colors: [AppColors.steelBlueLight, AppColors.softBlueGray],
-                    ),
-                    page: CategoriaPage(config: categoriaAlabanza),
-                  ),
-                  const SizedBox(height: 18),
-                  _CategoryCard(
-                    title: 'Para mejorar',
-                    icon: Icons.favorite_rounded,
-                    gradient: const LinearGradient(
-                      colors: [AppColors.softBlueGray, AppColors.steelBlueLight],
-                    ),
-                    page: const ParaMejorarPage(),
-                  ),
-                  const SizedBox(height: 28),
-                  const _SocialRow(),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         ],
       ),
@@ -166,19 +218,20 @@ class HomePage extends StatelessWidget {
 class _RoundIconButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _RoundIconButton({required this.icon, required this.onTap});
+  final bool isDark;
+  const _RoundIconButton({required this.icon, required this.onTap, required this.isDark});
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white.withOpacity(0.15),
+      color: isDark ? Colors.white.withOpacity(0.15) : AppColors.charcoal.withOpacity(0.15),
       shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(10.0),
-          child: Icon(icon, color: AppColors.cream, size: 24),
+          child: Icon(icon, color: isDark ? AppColors.cream : AppColors.charcoal, size: 24),
         ),
       ),
     );
@@ -188,14 +241,16 @@ class _RoundIconButton extends StatelessWidget {
 class _CategoryCard extends StatefulWidget {
   final String title;
   final IconData icon;
-  final Gradient gradient;
+  final Color accentColor;
   final Widget page;
+  final bool isDark;
 
   const _CategoryCard({
     required this.title,
     required this.icon,
-    required this.gradient,
+    required this.accentColor,
     required this.page,
+    required this.isDark,
   });
 
   @override
@@ -207,10 +262,24 @@ class _CategoryCardState extends State<_CategoryCard> {
 
   @override
   Widget build(BuildContext context) {
-    // Texto siempre blanco: ahora que las 3 tarjetas comparten la misma
-    // familia de azules medio-oscuros, el blanco tiene buen contraste en
-    // las 3, así que ya no hace falta la variante darkText de antes.
-    const textColor = Colors.white;
+    // La tarjeta ya NO usa el color de categoría como relleno principal —
+    // usa el mismo gradiente noche/día que el fondo de toda la pantalla,
+    // para que de verdad cambie de "clima" entre modos. El color de acento
+    // (widget.accentColor, ahora t.accent) queda en la barra lateral y el
+    // círculo del ícono.
+    final cardGradient = widget.isDark
+        ? const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [AppColors.charcoalSoft, AppColors.charcoal],
+          )
+        : LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Colors.white, AppColors.softBlueGray.withOpacity(0.6)],
+          );
+
+    final textColor = widget.isDark ? AppColors.cream : AppColors.charcoal;
 
     return GestureDetector(
       onTapDown: (_) => setState(() => _scale = 0.97),
@@ -233,41 +302,72 @@ class _CategoryCardState extends State<_CategoryCard> {
         duration: const Duration(milliseconds: 120),
         child: Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            gradient: widget.gradient,
+            gradient: cardGradient,
             borderRadius: BorderRadius.circular(AppShapes.radiusLg),
+            border: Border.all(
+              color: widget.isDark ? Colors.white.withOpacity(0.08) : AppColors.charcoal.withOpacity(0.06),
+              width: 1,
+            ),
             boxShadow: [
               BoxShadow(
-                color: AppColors.charcoal.withOpacity(0.12),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
+                color: Colors.black.withOpacity(widget.isDark ? 0.4 : 0.12),
+                blurRadius: widget.isDark ? 14 : 18,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.25),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(widget.icon, color: textColor, size: 26),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Text(
-                  widget.title,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: textColor,
+          child: ClipRRect(
+            // ClipRRect asegura que la barra de acento (que ahora se
+            // estira a toda la altura real de la tarjeta) respete las
+            // esquinas redondeadas del Container padre, sin importar el
+            // alto que termine midiendo el contenido.
+            borderRadius: BorderRadius.circular(AppShapes.radiusLg),
+            child: IntrinsicHeight(
+              // IntrinsicHeight hace que Flutter mida primero el contenido
+              // real (ícono + texto) y luego estire la barra lateral a
+              // exactamente esa altura con `double.infinity` — así nunca
+              // hay que ajustar un número fijo a mano ni queda descuadrada
+              // entre modo claro/oscuro.
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    width: 6,
+                    color: widget.accentColor,
                   ),
-                ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: widget.accentColor.withOpacity(widget.isDark ? 0.22 : 0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(widget.icon, color: widget.accentColor, size: 26),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Text(
+                              widget.title,
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w700,
+                                color: textColor,
+                              ),
+                            ),
+                          ),
+                          Icon(Icons.arrow_forward_ios_rounded, color: textColor.withOpacity(0.5), size: 18),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              Icon(Icons.arrow_forward_ios_rounded, color: textColor.withOpacity(0.7), size: 18),
-            ],
+            ),
           ),
         ),
       ),
@@ -276,18 +376,19 @@ class _CategoryCardState extends State<_CategoryCard> {
 }
 
 class _SocialRow extends StatelessWidget {
-  const _SocialRow();
+  final bool isDark;
+  const _SocialRow({required this.isDark});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        _SocialIcon(asset: 'assets/Facebook.png', url: 'https://m.facebook.com/mision.cristiana.luz.de.vida/'),
+        _SocialIcon(asset: 'assets/Facebook.png', url: 'https://m.facebook.com/mision.cristiana.luz.de.vida/', isDark: isDark),
         const SizedBox(width: 20),
-        _SocialIcon(asset: 'assets/youtube1.png', url: 'https://www.youtube.com/@misioncristianaluzdevida'),
+        _SocialIcon(asset: 'assets/youtube1.png', url: 'https://www.youtube.com/@misioncristianaluzdevida', isDark: isDark),
         const SizedBox(width: 20),
-        _SocialIcon(asset: 'assets/Google.png', url: 'https://sites.google.com/view/mvcl/p%C3%A1gina-principal'),
+        _SocialIcon(asset: 'assets/Google.png', url: 'https://sites.google.com/view/mvcl/p%C3%A1gina-principal', isDark: isDark),
       ],
     );
   }
@@ -296,21 +397,33 @@ class _SocialRow extends StatelessWidget {
 class _SocialIcon extends StatelessWidget {
   final String asset;
   final String url;
-  const _SocialIcon({required this.asset, required this.url});
+  final bool isDark;
+  const _SocialIcon({required this.asset, required this.url, required this.isDark});
 
   @override
   Widget build(BuildContext context) {
+    // t.accent: dorado clásico en modo noche, rosa-dorado en modo día —
+    // el dorado fijo (AppColors.gold) que antes se usaba aquí en ambos
+    // modos ya solo se conserva para la rama isDark.
+    final t = AppThemeData.of(context);
+
     return GestureDetector(
       onTap: () => launchExternalUrl(url),
       child: Container(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          gradient: isDark
+              ? const LinearGradient(colors: [AppColors.charcoalSoft, AppColors.charcoal])
+              : LinearGradient(colors: [Colors.white, t.accent.withOpacity(0.5)]),
           shape: BoxShape.circle,
+          border: Border.all(
+            color: isDark ? AppColors.gold.withOpacity(0.4) : t.accent.withOpacity(0.6),
+            width: 1.5,
+          ),
           boxShadow: [
             BoxShadow(
-              color: AppColors.charcoal.withOpacity(0.08),
-              blurRadius: 10,
+              color: isDark ? Colors.black.withOpacity(0.4) : t.accent.withOpacity(0.25),
+              blurRadius: isDark ? 10 : 14,
               offset: const Offset(0, 4),
             ),
           ],

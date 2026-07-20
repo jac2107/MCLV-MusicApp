@@ -7,6 +7,8 @@ import '../views/Vcanciones.dart';
 import '../utils/app_theme.dart';
 import 'medley.dart';
 import '../models/song_repository.dart';
+import '../utils/background_painters.dart';
+import 'dart:ui';
 
 class CategoriaConfig {
   final String appBarTitle;
@@ -51,9 +53,14 @@ final CategoriaConfig categoriaAdoracion = CategoriaConfig(
 
 final CategoriaConfig categoriaAlabanza = CategoriaConfig(
   appBarTitle: "Alabanzas",
-  primaryColor: AppColors.gold,
+primaryColor: const Color(0xFFC98A6B),
+gradient: const LinearGradient(
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+  colors: [Color(0xFFD9A488), Color(0xFFC98A6B)],
+),
   foregroundColor: Colors.white,
-  gradient: AppColors.goldGradient,
+
   storageKey: "custom_medleys1",
   categoriaKey: "alabanza",
   cancionesCompletas: cancionesCompletas1,
@@ -168,15 +175,16 @@ class _CategoriaPageState extends State<CategoriaPage> {
   }
 
   void _showFilterOptions() {
+    final t = AppThemeData.of(context);
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) {
         return Container(
           padding: const EdgeInsets.all(20.0),
-          decoration: const BoxDecoration(
-            color: AppColors.cream,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(AppShapes.radiusLg)),
+          decoration: BoxDecoration(
+            color: t.background,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(AppShapes.radiusLg)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -188,17 +196,18 @@ class _CategoriaPageState extends State<CategoriaPage> {
                   height: 4,
                   margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
-                    color: AppColors.softBlueGray,
+                    color: AppColors.softBlueGray.withOpacity(t.isDark ? 0.3 : 1),
                     borderRadius: BorderRadius.circular(4),
                   ),
                 ),
               ),
-              const Text("Opciones", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.charcoal)),
+              Text("Opciones", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: t.textPrimary)),
               const SizedBox(height: 12),
               _ModalOptionTile(
                 icon: Icons.music_note_rounded,
                 title: "Filtrar por Tonalidad",
                 color: config.primaryColor,
+                textColor: t.textPrimary,
                 onTap: () {
                   Navigator.pop(context);
                   _showTonalidadFilter();
@@ -208,6 +217,7 @@ class _CategoriaPageState extends State<CategoriaPage> {
                 icon: Icons.queue_music_rounded,
                 title: "Ver Medleys",
                 color: config.primaryColor,
+                textColor: t.textPrimary,
                 onTap: () {
                   Navigator.pop(context);
                   _showMedleys();
@@ -217,6 +227,7 @@ class _CategoriaPageState extends State<CategoriaPage> {
                 icon: Icons.add_circle_outline_rounded,
                 title: "Crear Medley",
                 color: config.primaryColor,
+                textColor: t.textPrimary,
                 onTap: () {
                   Navigator.pop(context);
                   _showCrearMedley();
@@ -231,6 +242,7 @@ class _CategoriaPageState extends State<CategoriaPage> {
   }
 
   void _showTonalidadFilter() {
+    final t = AppThemeData.of(context);
     final List<String> majorChords = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     final List<String> minorChords = majorChords.map((chord) => chord + "m").toList();
 
@@ -251,16 +263,16 @@ class _CategoriaPageState extends State<CategoriaPage> {
             padding: const EdgeInsets.symmetric(vertical: 12),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: selected ? config.primaryColor : Colors.white,
+              color: selected ? config.primaryColor : t.cardColor,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: selected ? config.primaryColor : AppColors.softBlueGray),
+              border: Border.all(color: selected ? config.primaryColor : t.textSecondary.withOpacity(0.3)),
             ),
             child: Text(
               chord,
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
-                color: selected ? Colors.white : AppColors.charcoal,
+                color: selected ? Colors.white : t.textPrimary,
               ),
             ),
           ),
@@ -275,13 +287,13 @@ class _CategoriaPageState extends State<CategoriaPage> {
         return Container(
           padding: const EdgeInsets.all(20.0),
           height: 440,
-          decoration: const BoxDecoration(
-            color: AppColors.cream,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(AppShapes.radiusLg)),
+          decoration: BoxDecoration(
+            color: t.background,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(AppShapes.radiusLg)),
           ),
           child: Column(
             children: [
-              const Text("Filtrar por Tonalidad", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.charcoal)),
+              Text("Filtrar por Tonalidad", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: t.textPrimary)),
               const SizedBox(height: 14),
               Expanded(
                 child: Row(
@@ -289,7 +301,7 @@ class _CategoriaPageState extends State<CategoriaPage> {
                     Expanded(
                       child: Column(
                         children: [
-                          const Text("Mayores", style: TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w600)),
+                          Text("Mayores", style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 8),
                           Expanded(child: ListView(children: majorChords.map(buildFilterButton).toList())),
                         ],
@@ -299,7 +311,7 @@ class _CategoriaPageState extends State<CategoriaPage> {
                     Expanded(
                       child: Column(
                         children: [
-                          const Text("Menores", style: TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w600)),
+                          Text("Menores", style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 8),
                           Expanded(child: ListView(children: minorChords.map(buildFilterButton).toList())),
                         ],
@@ -318,6 +330,8 @@ class _CategoriaPageState extends State<CategoriaPage> {
                   },
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
+                    foregroundColor: t.textPrimary,
+                    side: BorderSide(color: t.textSecondary.withOpacity(0.4)),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
                   child: const Text("Limpiar Filtro"),
@@ -331,6 +345,7 @@ class _CategoriaPageState extends State<CategoriaPage> {
   }
 
   void _showMedleys() {
+    final t = AppThemeData.of(context);
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -341,9 +356,9 @@ class _CategoriaPageState extends State<CategoriaPage> {
             return Container(
               padding: const EdgeInsets.all(16.0),
               constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
-              decoration: const BoxDecoration(
-                color: AppColors.cream,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(AppShapes.radiusLg)),
+              decoration: BoxDecoration(
+                color: t.background,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(AppShapes.radiusLg)),
               ),
               child: ListView.builder(
                 shrinkWrap: true,
@@ -353,12 +368,12 @@ class _CategoriaPageState extends State<CategoriaPage> {
                   bool isExpanded = expandedIndex == index;
                   return Container(
                     margin: const EdgeInsets.only(bottom: 10),
-                    decoration: AppShapes.softCard(),
+                    decoration: AppShapes.softCard(color: t.cardColor, dark: t.isDark),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         ListTile(
-                          title: Text(medley.name, style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.charcoal)),
+                          title: Text(medley.name, style: TextStyle(fontWeight: FontWeight.w700, color: t.textPrimary)),
                           trailing: Icon(Icons.arrow_forward_ios_rounded, size: 16, color: config.primaryColor),
                           onTap: () {
                             Navigator.pop(context);
@@ -428,7 +443,7 @@ class _CategoriaPageState extends State<CategoriaPage> {
                                     padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                                     child: Wrap(
                                       spacing: 8.0,
-                                      children: medley.canciones.map((cancion) => Text("- $cancion", style: const TextStyle(color: AppColors.charcoal))).toList(),
+                                      children: medley.canciones.map((cancion) => Text("- $cancion", style: TextStyle(color: t.textPrimary))).toList(),
                                     ),
                                   )
                                 : const SizedBox.shrink(),
@@ -466,61 +481,111 @@ class _CategoriaPageState extends State<CategoriaPage> {
     );
   }
 
-  Widget _buildSongButton(Song song) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10.0),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppShapes.radiusMd),
-          onTap: () {
-            Navigator.push(context, MaterialPageRoute(builder: (context) => Vcanciones(cancion: song)));
-          },
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-            decoration: song.status == 1
-                ? AppShapes.gradientButton(config.gradient, radius: AppShapes.radiusMd)
-                : AppShapes.softCard(radius: AppShapes.radiusMd),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    song.title,
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w600,
-                      color: song.status == 1 ? Colors.white : AppColors.charcoal,
-                    ),
+Widget _buildSongButton(Song song, AppThemeData t) {
+  final glassFill = t.isDark ? Colors.white.withOpacity(0.06) : Colors.white.withOpacity(0.35);
+  final glassBorder = t.isDark ? Colors.white.withOpacity(0.15) : Colors.white.withOpacity(0.55);
+
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 10.0),
+    child: Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppShapes.radiusMd),
+        onTap: () {
+          Navigator.push(context, MaterialPageRoute(builder: (context) => Vcanciones(cancion: song)));
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+          decoration: song.status == 1
+            ? AppShapes.gradientButton(
+                LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    config.gradient.colors.first.withOpacity(0.55),
+                    config.gradient.colors.last.withOpacity(0.55),
+                  ],
+                ),
+                radius: AppShapes.radiusMd,
+                glowColor: config.primaryColor,
+              )
+            : BoxDecoration(
+                  color: glassFill,
+                  borderRadius: BorderRadius.circular(AppShapes.radiusMd),
+                  border: Border.all(color: glassBorder, width: 1.2),
+                ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  song.title,
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: song.status == 1 ? Colors.white : t.textPrimary,
                   ),
                 ),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: song.status == 1 ? Colors.white70 : AppColors.softBlueGray,
-                ),
-              ],
-            ),
+              ),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: song.status == 1 ? Colors.white70 : config.primaryColor,
+              ),
+            ],
           ),
         ),
       ),
-    );
-  }
-
+    ),
+  );
+}
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.cream,
-      body: CustomScrollView(
-        slivers: [
+Widget build(BuildContext context) {
+  final t = AppThemeData.of(context);
+  return Scaffold(
+    backgroundColor: t.background,
+    body: Stack(
+      children: [
+        Positioned.fill(
+  child: DecoratedBox(
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: t.isDark
+            ? [AppColors.charcoal, Color.alphaBlend(config.primaryColor.withOpacity(0.25), AppColors.charcoal)]
+            : [Color.alphaBlend(config.primaryColor.withOpacity(0.35), AppColors.cream), AppColors.cream],
+      ),
+    ),
+  ),
+),
+Positioned.fill(
+  child: IgnorePointer(
+    child: t.isDark ? const StarsPainter() : const SunsetWavesPainter(),
+  ),
+),
+        CustomScrollView(
+          slivers: [
           SliverAppBar(
-            expandedHeight: 120,
-            pinned: true,
-            backgroundColor: config.primaryColor,
-            flexibleSpace: FlexibleSpaceBar(
-              titlePadding: const EdgeInsets.only(left: 56, bottom: 16, right: 16),
-              title: Text(config.appBarTitle, style: const TextStyle(fontWeight: FontWeight.w700)),
-              background: Container(decoration: BoxDecoration(gradient: config.gradient)),
-            ),
-            actions: [
+              expandedHeight: 120,
+              pinned: true,
+              backgroundColor: config.primaryColor.withOpacity(0.55),
+              elevation: 0,
+              flexibleSpace: FlexibleSpaceBar(
+                titlePadding: const EdgeInsets.only(left: 56, bottom: 16, right: 16),
+                title: Text(config.appBarTitle, style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white)),
+                background: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        config.primaryColor.withOpacity(0.45),
+                        config.primaryColor.withOpacity(0.15),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              actions: [
               if (_cargandoCanciones)
                 const Padding(
                   padding: EdgeInsets.all(16.0),
@@ -543,19 +608,21 @@ class _CategoriaPageState extends State<CategoriaPage> {
                       children: [
                         Expanded(
                           child: Container(
-                            decoration: AppShapes.softCard(radius: AppShapes.radiusMd),
+                            decoration: AppShapes.softCard(color: t.cardColor, radius: AppShapes.radiusMd, dark: t.isDark),
                             child: TextField(
                               controller: _searchController,
+                              style: TextStyle(color: t.textPrimary),
                               onChanged: (value) {
                                 _filterSongs(value);
                                 setState(() {});
                               },
                               decoration: InputDecoration(
                                 hintText: "Buscar canción...",
+                                hintStyle: TextStyle(color: t.textSecondary),
                                 prefixIcon: Icon(Icons.search_rounded, color: config.primaryColor),
                                 suffixIcon: _searchController.text.isNotEmpty
                                     ? IconButton(
-                                        icon: const Icon(Icons.clear_rounded),
+                                        icon: Icon(Icons.clear_rounded, color: t.textSecondary),
                                         onPressed: () {
                                           _searchController.clear();
                                           _filterSongs('');
@@ -585,14 +652,14 @@ class _CategoriaPageState extends State<CategoriaPage> {
                         if (_selectedTonalidad != null) ...[
                           const SizedBox(width: 8),
                           Material(
-                            color: AppColors.softBlueGray,
+                            color: t.cardColor,
                             borderRadius: BorderRadius.circular(AppShapes.radiusMd),
                             child: InkWell(
                               borderRadius: BorderRadius.circular(AppShapes.radiusMd),
                               onTap: _clearTonalidad,
-                              child: const Padding(
-                                padding: EdgeInsets.all(16.0),
-                                child: Icon(Icons.close_rounded, color: AppColors.charcoal),
+                              child: Padding(
+                                padding: const EdgeInsets.all(16.0),
+                                child: Icon(Icons.close_rounded, color: t.textPrimary),
                               ),
                             ),
                           ),
@@ -604,16 +671,17 @@ class _CategoriaPageState extends State<CategoriaPage> {
                         ? Padding(
                             padding: const EdgeInsets.symmetric(vertical: 40),
                             child: Center(
-                              child: Text("No hay canciones en esa tonalidad", style: TextStyle(color: AppColors.charcoal.withOpacity(0.6))),
+                              child: Text("No hay canciones en esa tonalidad", style: TextStyle(color: t.textSecondary)),
                             ),
                           )
                         : Column(
-                            children: _filteredSongs.map(_buildSongButton).toList(),
+                            children: _filteredSongs.map((s) => _buildSongButton(s, t)).toList(),
                           ),
                   ],
                 ),
               ),
             ),
+        )],
           ),
         ],
       ),
@@ -625,9 +693,16 @@ class _ModalOptionTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final Color color;
+  final Color textColor;
   final VoidCallback onTap;
 
-  const _ModalOptionTile({required this.icon, required this.title, required this.color, required this.onTap});
+  const _ModalOptionTile({
+    required this.icon,
+    required this.title,
+    required this.color,
+    required this.textColor,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -638,7 +713,7 @@ class _ModalOptionTile extends StatelessWidget {
         decoration: BoxDecoration(color: color.withOpacity(0.15), shape: BoxShape.circle),
         child: Icon(icon, color: color),
       ),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.charcoal)),
+      title: Text(title, style: TextStyle(fontWeight: FontWeight.w600, color: textColor)),
       onTap: onTap,
     );
   }

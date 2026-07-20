@@ -34,7 +34,7 @@ dependencies:
   share_plus: ^10.0.0   # para el botón de compartir
   pdf: ^3.11.1          # generar el PDF de canciones/medleys
   printing: ^5.13.3     # vista previa e impartir el PDF generado
-
+  flutter_soloud: ^3.3.7
 
 dev_dependencies:
   flutter_test:
@@ -50,6 +50,10 @@ flutter_launcher_icons:
   adaptive_icon_background: "#FFFFFF"
 
 flutter:
+  fonts:
+    - family: RobotoMono
+      fonts:
+        - asset: assets/fonts/RobotoMono-Regular.ttf
   uses-material-design: true
   assets:
     - assets/image.png
