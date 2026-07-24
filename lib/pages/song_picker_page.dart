@@ -155,10 +155,11 @@ class _SongPickerPageState extends State<SongPickerPage>
     );
 
     try {
+      final todasSeleccionadas = [...adoracionSel, ...alabanzaSel];
       final bytes = await SongPdfGenerator.generate(
-        adoracion: adoracionSel,
-        alabanza: alabanzaSel,
-        tituloRepertorio: titulo.isNotEmpty ? titulo : null,
+        canciones: todasSeleccionadas,
+        categoriaDe: (song) => song.categoria,
+        tituloRepertorio: titulo,
       );
       if (!mounted) return;
       Navigator.pop(context); // cierra el loading

@@ -1,1 +1,39 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"mclv-musicapp","appId":"1:878190453723:android:04a18ab9d65968c5313dfe","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"mclv-musicapp","configurations":{"android":"1:878190453723:android:04a18ab9d65968c5313dfe","ios":"1:878190453723:ios:e8bfc19e2b5f759f313dfe","macos":"1:878190453723:ios:e8bfc19e2b5f759f313dfe","web":"1:878190453723:web:0fb19e12ddb87633313dfe","windows":"1:878190453723:web:0582f71b80c42c1a313dfe"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "mclv-musicapp",
+          "appId": "1:878190453723:android:04a18ab9d65968c5313dfe",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "mclv-musicapp",
+          "configurations": {
+            "android": "1:878190453723:android:04a18ab9d65968c5313dfe",
+            "ios": "1:878190453723:ios:e8bfc19e2b5f759f313dfe",
+            "macos": "1:878190453723:ios:e8bfc19e2b5f759f313dfe",
+            "web": "1:878190453723:web:0fb19e12ddb87633313dfe",
+            "windows": "1:878190453723:web:0582f71b80c42c1a313dfe"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

@@ -858,10 +858,9 @@ void _updateYoutubePlayerVisibility() {
       builder: (_) => const Center(child: CircularProgressIndicator()),
     );
     try {
-      final esAlabanza = widget.cancion.categoria == 'alabanza';
       final bytes = await SongPdfGenerator.generate(
-        adoracion: esAlabanza ? [] : [widget.cancion],
-        alabanza: esAlabanza ? [widget.cancion] : [],
+        canciones: [widget.cancion],
+        categoriaDe: (song) => song.categoria,
         tituloRepertorio: titulo,
       );
       if (!mounted) return;

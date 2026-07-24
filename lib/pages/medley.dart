@@ -605,12 +605,11 @@ class _MedleyDetailPageState extends State<MedleyDetailPage> {
       // índice de portada, así que las mandamos todas como "alabanza" si
       // no tienen categoria, o agrupadas por su categoria real si la
       // tienen.
-      final adoracion = songs.where((s) => s.categoria != 'alabanza').toList();
-      final alabanza = songs.where((s) => s.categoria == 'alabanza').toList();
-
+      // songs ya está en el orden del medley (widget.medley.canciones),
+      // con la transposición de cada una ya aplicada.
       final bytes = await SongPdfGenerator.generate(
-        adoracion: adoracion,
-        alabanza: alabanza,
+        canciones: songs,
+        categoriaDe: (song) => song.categoria,
         tituloRepertorio: widget.medley.name,
       );
       if (!mounted) return;
