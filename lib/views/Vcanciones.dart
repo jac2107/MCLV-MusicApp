@@ -19,7 +19,6 @@ import '../models/favorites_repository.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../utils/song_id.dart';
 import '../widgets/enhanced_youtube_player.dart';
-import 'package:flutter_soloud/flutter_soloud.dart';
 import 'package:native_metronome/native_metronome.dart';
 
 class Vcanciones extends StatefulWidget {
@@ -40,7 +39,9 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
   late Future<String> _thumbnailFuture;
   bool isMetronomePlaying = false;
   int transposeValue = 0;
-  final int originalTransposeValue = 0;
+  double _lyricsFontSize = 16.0;
+  static const double _minFontSize = 12.0;
+  static const double _maxFontSize = 28.0;  final int originalTransposeValue = 0;
   bool showTransposeButtons = false;
   bool isMultitrackPlaying = false;
   bool isMultitrackVisible = false;
@@ -107,6 +108,7 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _entryController, curve: Curves.easeOutCubic));
 
+    _loadFontSizePreference();
     _checkConnectionAndInit();
     _loadFavoriteState();
     FavoritesRepository.instance.registerSongOpened(widget.cancion.title);
@@ -134,7 +136,20 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
       });
     }
   }
+  Future<void> _loadFontSizePreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getDouble('lyrics_font_size');
+    if (saved != null && mounted) {
+      setState(() => _lyricsFontSize = saved);
+    }
+    }
 
+  Future<void> _changeFontSize(double delta) async {
+    final newSize = (_lyricsFontSize + delta).clamp(_minFontSize, _maxFontSize);
+    setState(() => _lyricsFontSize = newSize);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('lyrics_font_size', newSize);
+  }
   Future<void> _loadFavoriteState() async {
     final fav = await FavoritesRepository.instance.isFavorite(widget.cancion.title);
     if (!mounted) return;
@@ -1306,6 +1321,7 @@ void _updateYoutubePlayerVisibility() {
                                                     onPressed: toggleTransposeButtons,
                                                     padding: EdgeInsets.zero,
                                                   ),
+                                                  
                                                   const SizedBox(width: 5),
                                                   AnimatedOpacity(
                                                     opacity: showTransposeButtons ? 1.0 : 0.0,
@@ -1313,21 +1329,40 @@ void _updateYoutubePlayerVisibility() {
                                                     child: Row(
                                                       mainAxisSize: MainAxisSize.min,
                                                       children: [
-                                                        _buildTransposeButton("+1", 2, accentColor),
-                                                        _buildTransposeButton("+½", 1, accentColor),
-                                                        _buildTransposeButton("-½", -1, accentColor),
                                                         _buildTransposeButton("-1", -2, accentColor),
-                                                        _buildTransposeButton("orig", 0, accentColor, isReset: true),
+                                                        _buildTransposeButton("-½", -1, accentColor),
+                                                        _buildTransposeButton("+½", 1, accentColor),
+                                                        _buildTransposeButton("+1", 2, accentColor),
+                                                        _buildTransposeButton("Original", 0, accentColor, isReset: true),
                                                       ],
                                                     ),
                                                   ),
-                                                  const SizedBox(width: 5),
+                                            ],
+                                            ),
+                                              Row(
+                                                children: [
+                                                  const SizedBox(width: 0),
                                                   IconButton(
                                                     icon: Icon(
                                                       isMetronomePlaying ? Icons.pause : Icons.play_arrow,
                                                       color: cancion.tiempo <= 0 ? Colors.grey : lyricsTextColor,
                                                     ),
                                                     onPressed: toggleMetronome,
+                                                    padding: EdgeInsets.zero,
+                                                  ),
+                                                  const SizedBox(width: 5),
+                                                  IconButton(
+                                                    icon: Icon(Icons.text_decrease_rounded, color: lyricsTextColor),
+                                                    onPressed: _lyricsFontSize > _minFontSize
+                                                        ? () => _changeFontSize(-2)
+                                                        : null,
+                                                    padding: EdgeInsets.zero,
+                                                  ),
+                                                  IconButton(
+                                                    icon: Icon(Icons.text_increase_rounded, color: lyricsTextColor),
+                                                    onPressed: _lyricsFontSize < _maxFontSize
+                                                        ? () => _changeFontSize(2)
+                                                        : null,
                                                     padding: EdgeInsets.zero,
                                                   ),
                                                 ],
@@ -1350,7 +1385,7 @@ void _updateYoutubePlayerVisibility() {
                                                 child: RichText(
                                                   softWrap: false,
                                                   text: TextSpan(
-                                                    style: const TextStyle(fontSize: 16, fontFamily: 'RobotoMono'),
+                                                    style: TextStyle(fontSize: _lyricsFontSize, fontFamily: 'RobotoMono'),
                                                     children: parseLyrics(
                                                         cancion.text, secondaryColor, accentColor, lyricsTextColor),
                                                   ),

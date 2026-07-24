@@ -34,10 +34,19 @@ class Song {
   });
 
   /// Construye una Song a partir de un documento de Firestore.
+/// Construye una Song a partir de un documento de Firestore.
   factory Song.fromMap(Map<String, dynamic> map) {
     List<String>? asStringList(dynamic value) {
       if (value == null) return null;
       return List<String>.from(value as List);
+    }
+
+    // Calcula el status automáticamente si no viene o viene vacío
+    // status = 2 si tiene multitrack, status = 1 si no
+    int? status = (map['status'] as num?)?.toInt();
+    if (status == null || status == 0) {
+      final hasMultitrack = (map['multitrackLink'] as String?)?.isNotEmpty ?? false;
+      status = hasMultitrack ? 2 : 1;
     }
 
     return Song(
@@ -45,7 +54,7 @@ class Song {
       text: map['text'] as String,
       tonalidad: map['tonalidad'] as String? ?? '',
       tiempo: (map['tiempo'] as num?)?.toInt() ?? 0,
-      status: (map['status'] as num?)?.toInt(),
+      status: status,
       instrument: (map['instrument'] as num?)?.toInt(),
       multitrackLink: map['multitrackLink'] as String?,
       youtubeLink: map['youtubeLink'] as String?,

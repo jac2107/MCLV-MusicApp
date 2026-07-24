@@ -10,7 +10,17 @@ class SongRepository {
   static const _cacheKeyPrefix = 'canciones_cache_'; // + categoria
   static const _lastSyncKeyPrefix = 'canciones_last_sync_'; // + categoria
   static const _newTitlesKeyPrefix = 'canciones_nuevas_'; // + categoria
-
+String _normalizeForSort(String text) {
+  const diacritics = {
+    'Á': 'A', 'É': 'E', 'Í': 'I', 'Ó': 'O', 'U': 'Ú',
+    'Ñ': 'N', 
+  };
+  String normalized = text.toUpperCase();
+  diacritics.forEach((key, value) {
+    normalized = normalized.replaceAll(key, value);
+  });
+  return normalized;
+}
   /// Lee las canciones guardadas localmente para una categoría
   /// ("adoracion" o "alabanza"). Devuelve lista vacía si nunca se
   /// sincronizó (primera instalación sin internet).
@@ -20,7 +30,7 @@ class SongRepository {
     if (raw == null) return [];
     final List<dynamic> data = jsonDecode(raw);
     final songs = data.map((m) => Song.fromMap(Map<String, dynamic>.from(m))).toList();
-    songs.sort((a, b) => a.title.toUpperCase().compareTo(b.title.toUpperCase()));
+    songs.sort((a, b) => _normalizeForSort(a.title).compareTo(_normalizeForSort(b.title)));
     return songs;
   }
 
@@ -49,8 +59,7 @@ class SongRepository {
           .toList();
 
       // Orden alfabético por título, sin distinguir mayúsculas/minúsculas.
-      songsFromServer.sort((a, b) => a.title.toUpperCase().compareTo(b.title.toUpperCase()));
-
+      songsFromServer.sort((a, b) => _normalizeForSort(a.title).compareTo(_normalizeForSort(b.title)));
       // Detectar cuáles son nuevas respecto al cache anterior
       final cached = await loadFromCache(categoria);
       final cachedTitles = cached.map((s) => s.title.toUpperCase()).toSet();
