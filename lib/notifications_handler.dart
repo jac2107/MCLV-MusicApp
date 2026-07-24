@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'models/serializable_message.dart';
 
 /// Variable única y compartida para evitar procesar la misma notificación dos veces.
 /// Antes existía una copia de esta variable en main.dart y otra en notifications_page.dart,
@@ -73,50 +74,6 @@ Future<void> showLocalNotification(RemoteMessage message) async {
     details,
     payload: message.data['url'] ?? '',
   );
-}
-
-class SerializableMessage {
-  final String? messageId;
-  final String? title;
-  final String? body;
-  final Map<String, dynamic>? data;
-  final String? url;
-  final String timestamp;
-  bool seen;
-
-  SerializableMessage({
-    this.messageId,
-    this.title,
-    this.body,
-    this.data,
-    this.url,
-    required this.timestamp,
-    this.seen = false,
-  });
-
-  factory SerializableMessage.fromJson(Map<String, dynamic> json) {
-    return SerializableMessage(
-      messageId: json['messageId'] ?? '',
-      title: json['title'] ?? 'Sin título',
-      body: json['body'] ?? 'Sin contenido',
-      data: json['data'] != null ? Map<String, dynamic>.from(json['data']) : null,
-      url: json['url'] ?? '',
-      timestamp: json['timestamp'] ?? DateTime.now().toLocal().toString(),
-      seen: json['seen'] ?? false,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'messageId': messageId,
-      'title': title,
-      'body': body,
-      'data': data,
-      'url': url,
-      'timestamp': timestamp,
-      'seen': seen,
-    };
-  }
 }
 
 /// Función que guarda el mensaje en SharedPreferences

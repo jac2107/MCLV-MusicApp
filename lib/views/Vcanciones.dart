@@ -3,7 +3,7 @@ import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:palette_generator/palette_generator.dart';
 import '../models/Mcanciones.dart';
 import 'dart:async';
-import 'dart:io';
+import '../utils/thumbnail_cache_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,7 +19,9 @@ import '../models/favorites_repository.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../utils/song_id.dart';
 import '../widgets/enhanced_youtube_player.dart';
-import 'package:native_metronome/native_metronome.dart';
+import '../widgets/youtube_embed.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import '../utils/metronome_service.dart';
 
 class Vcanciones extends StatefulWidget {
   final Song cancion;
@@ -126,7 +128,7 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
     _thumbnailFuture = _getThumbnailUrl();
     _extractColorsFromImage();
 
-    if (hasConnection) {
+    if (hasConnection && !kIsWeb) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           setState(() {
@@ -187,19 +189,10 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
     setState(() {
       _hasConnection = hasConnection;
     });
-    if (hasConnection && _youtubeController == null) {
+    if (hasConnection && !kIsWeb && _youtubeController == null) {
       _getOrCreateYoutubeController();
       setState(() {});
     }
-  }
-
-  Future<Directory> _thumbnailCacheDir() async {
-    final Directory base = await getApplicationDocumentsDirectory();
-    final Directory dir = Directory('${base.path}/thumbnail_cache');
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-    return dir;
   }
 
   static const int _thumbnailCacheVersion = 2;
@@ -214,15 +207,7 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
 
     if (order.length > _maxCachedThumbnails) {
       final String oldestKey = order.removeAt(0);
-      try {
-        final Directory dir = await _thumbnailCacheDir();
-        final File oldFile = File('${dir.path}/$oldestKey.jpg');
-        if (await oldFile.exists()) {
-          await oldFile.delete();
-        }
-      } catch (e) {
-        // No crítico.
-      }
+      await ThumbnailCacheService.deleteCached(oldestKey);
     }
 
     await prefs.setStringList(_thumbnailOrderKey, order);
@@ -235,26 +220,32 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
     }
     videoId = extractedId;
 
-    final String cacheKey = _thumbnailCacheKey();
-    final Directory dir = await _thumbnailCacheDir();
-    final File localFile = File('${dir.path}/$cacheKey.jpg');
+    final String thumbUrl = 'https://img.youtube.com/vi/$videoId/hqdefault.jpg';
 
-    if (await localFile.exists()) {
+    // En web no hay cache en disco: el navegador ya cachea la imagen de
+    // red por su cuenta vía HTTP, así que devolvemos la URL directo.
+    if (kIsWeb) {
+      return thumbUrl;
+    }
+
+    final String cacheKey = _thumbnailCacheKey();
+    final String? cachedPath = await ThumbnailCacheService.getCachedPath(cacheKey);
+
+    if (cachedPath != null) {
       await _touchThumbnailLru(cacheKey);
-      return localFile.path;
+      return cachedPath;
     }
 
     if (_hasConnection == false) {
       return 'assets/image.png';
     }
 
-    final String thumbUrl = 'https://img.youtube.com/vi/$videoId/hqdefault.jpg';
     try {
       final response = await http.get(Uri.parse(thumbUrl));
       if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
-        await localFile.writeAsBytes(response.bodyBytes);
+        final String localPath = await ThumbnailCacheService.save(cacheKey, response.bodyBytes);
         await _touchThumbnailLru(cacheKey);
-        return localFile.path;
+        return localPath;
       }
     } catch (e) {
       print('Error al descargar la miniatura: $e');
@@ -264,7 +255,7 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
   }
 
   bool _isLocalFilePath(String path) {
-    return path.isNotEmpty && !path.startsWith('http') && path != 'assets/image.png';
+    return ThumbnailCacheService.isLocalPath(path);
   }
 
   Widget _buildThumbnailImage(String path, {required double height, BoxFit fit = BoxFit.cover}) {
@@ -282,11 +273,10 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
       return Image.asset('assets/image.png', fit: fit, height: height, width: double.infinity);
     }
     if (_isLocalFilePath(path)) {
-      return Image.file(
-        File(path),
+      return ThumbnailCacheService.imageFromLocalPath(
+        path,
         fit: fit,
         height: height,
-        width: double.infinity,
         errorBuilder: (context, error, stackTrace) {
           return Image.asset('assets/image.png', fit: fit, height: height, width: double.infinity);
         },
@@ -310,6 +300,23 @@ class _VcancionesState extends State<Vcanciones> with SingleTickerProviderStateM
     } catch (e) {
       return '';
     }
+  }
+
+  Widget _buildWebYoutubeEmbed(String? link) {
+    final String id = _safeExtractVideoId(link);
+    if (id.isEmpty) {
+      return _buildVideoErrorFallback(
+        message: 'Este enlace de YouTube no es válido o está roto.',
+        originalLink: link,
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppShapes.radiusMd),
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: YoutubeIframeEmbed(videoId: id),
+      ),
+    );
   }
 
 YoutubePlayerController _getOrCreateYoutubeController() {
@@ -457,7 +464,7 @@ YoutubePlayerController _getOrCreateYoutubeController() {
 
       try {
         final ImageProvider imageProvider = _isLocalFilePath(thumbnailPath)
-            ? FileImage(File(thumbnailPath)) as ImageProvider
+            ? ThumbnailCacheService.imageProviderFromLocalPath(thumbnailPath)
             : NetworkImage(thumbnailPath);
 
         final PaletteGenerator paletteGenerator = await PaletteGenerator.fromImageProvider(imageProvider);
@@ -682,15 +689,15 @@ void dispose() {
     setState(() {
       isMetronomePlaying = !isMetronomePlaying;
       if (isMetronomePlaying) {
-        NativeMetronome.start(widget.cancion.tiempo);
+        MetronomeService.start(widget.cancion.tiempo);
       } else {
-        NativeMetronome.stop();
+        MetronomeService.stop();
       }
     });
   }
 
 void stopMetronome() {
-    NativeMetronome.stop();
+    MetronomeService.stop();
   }
 
 
@@ -914,6 +921,15 @@ void _updateYoutubePlayerVisibility() {
       return _buildVideoErrorFallback(
         message: 'Este enlace de instrumento no es válido o está roto.',
         originalLink: link,
+      );
+    }
+    if (kIsWeb) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(AppShapes.radiusMd),
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
+          child: YoutubeIframeEmbed(videoId: id),
+        ),
       );
     }
     return _InstrumentYoutubePlayer(videoId: id, originalLink: link);
@@ -1173,7 +1189,7 @@ void _updateYoutubePlayerVisibility() {
                                                     onPressed: () {
                                                       setState(() {
                                                         isMultitrackVisible = !isMultitrackVisible;
-                                                        if (isMultitrackVisible) {
+                                                        if (isMultitrackVisible && !kIsWeb) {
                                                           _getOrCreateMultitrackController();
                                                         }
                                                       });
@@ -1193,7 +1209,17 @@ void _updateYoutubePlayerVisibility() {
                                                     ),
                                                   ),
                                                 const SizedBox(height: 10),
-                                                if (isMultitrackVisible && _multitrackController != null)
+                                                // En web mostramos un iframe visible con los controles nativos
+                                                // de YouTube (play/pause/seek/volumen), en vez del reproductor
+                                                // invisible + slider propio que se usa en Android/iOS. La
+                                                // sincronización fina con slider custom no es viable sin JS
+                                                // interop adicional, así que este es el trade-off para web.
+                                                if (isMultitrackVisible && kIsWeb)
+                                                  Padding(
+                                                    padding: const EdgeInsets.only(bottom: 10),
+                                                    child: _buildWebYoutubeEmbed(cancion.multitrackLink),
+                                                  ),
+                                                if (isMultitrackVisible && !kIsWeb && _multitrackController != null)
                                                   (_multitrackController!.initialVideoId.isEmpty)
                                                       ? _buildVideoErrorFallback(
                                                           message: 'El enlace del multitrack no es válido.',
@@ -1342,15 +1368,18 @@ void _updateYoutubePlayerVisibility() {
                                               Row(
                                                 children: [
                                                   const SizedBox(width: 0),
-                                                  IconButton(
-                                                    icon: Icon(
-                                                      isMetronomePlaying ? Icons.pause : Icons.play_arrow,
-                                                      color: cancion.tiempo <= 0 ? Colors.grey : lyricsTextColor,
+                                                  // El metrónomo no está disponible en la versión web
+                                                  // (native_metronome es un plugin nativo Android/iOS).
+                                                  if (!kIsWeb)
+                                                    IconButton(
+                                                      icon: Icon(
+                                                        isMetronomePlaying ? Icons.pause : Icons.play_arrow,
+                                                        color: cancion.tiempo <= 0 ? Colors.grey : lyricsTextColor,
+                                                      ),
+                                                      onPressed: toggleMetronome,
+                                                      padding: EdgeInsets.zero,
                                                     ),
-                                                    onPressed: toggleMetronome,
-                                                    padding: EdgeInsets.zero,
-                                                  ),
-                                                  const SizedBox(width: 5),
+                                                  if (!kIsWeb) const SizedBox(width: 5),
                                                   IconButton(
                                                     icon: Icon(Icons.text_decrease_rounded, color: lyricsTextColor),
                                                     onPressed: _lyricsFontSize > _minFontSize
@@ -1396,25 +1425,27 @@ void _updateYoutubePlayerVisibility() {
                                                   cancion.youtubeLink != null &&
                                                   cancion.youtubeLink != "null" &&
                                                   cancion.youtubeLink!.isNotEmpty &&
-                                                  _youtubeController != null)
+                                                  (kIsWeb || _youtubeController != null))
                                                 Container(
                                                   key: _youtubePlayerKey,
                                                   margin: const EdgeInsets.symmetric(vertical: 10),
-                                                  child: _youtubeController!.initialVideoId.isEmpty
-                                                      ? _buildVideoErrorFallback(
-                                                          message: 'Este enlace de YouTube no es válido o está roto.',
-                                                          originalLink: cancion.youtubeLink,
-                                                        )
-                                                      : _youtubeHasError
+                                                  child: kIsWeb
+                                                      ? _buildWebYoutubeEmbed(cancion.youtubeLink)
+                                                      : _youtubeController!.initialVideoId.isEmpty
                                                           ? _buildVideoErrorFallback(
-                                                              message:
-                                                                  'Este video ya no está disponible (puede haber sido eliminado, ser privado o estar bloqueado en tu región).',
+                                                              message: 'Este enlace de YouTube no es válido o está roto.',
                                                               originalLink: cancion.youtubeLink,
                                                             )
-                                                          : ClipRRect(
-                                                              borderRadius: BorderRadius.circular(AppShapes.radiusMd),
-                                                              child: EnhancedYoutubePlayer(controller: _youtubeController!),
-                                                            ),
+                                                          : _youtubeHasError
+                                                              ? _buildVideoErrorFallback(
+                                                                  message:
+                                                                      'Este video ya no está disponible (puede haber sido eliminado, ser privado o estar bloqueado en tu región).',
+                                                                  originalLink: cancion.youtubeLink,
+                                                                )
+                                                              : ClipRRect(
+                                                                  borderRadius: BorderRadius.circular(AppShapes.radiusMd),
+                                                                  child: EnhancedYoutubePlayer(controller: _youtubeController!),
+                                                                ),
                                                 ),
                                               const SizedBox(height: 20),
                                             ],

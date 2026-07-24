@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'utils/launch_url.dart';
 import 'utils/app_theme.dart';
-import 'notifications_handler.dart'; // Importa el handler común
+import 'models/serializable_message.dart';
 
 class NotificationsPage extends StatefulWidget {
   const NotificationsPage({Key? key}) : super(key: key);

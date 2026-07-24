@@ -16,17 +16,39 @@ import 'package:flutter/foundation.dart'
 /// ```
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
+    if (kIsWeb) {
+      return web;
+    }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
         return ios;
+      case TargetPlatform.macOS:
+        return macos;
+      case TargetPlatform.windows:
+        return windows;
+      case TargetPlatform.linux:
+        throw UnsupportedError(
+          'DefaultFirebaseOptions have not been configured for linux - '
+          'you can reconfigure this by running the FlutterFire CLI again.',
+        );
       default:
         throw UnsupportedError(
           'DefaultFirebaseOptions are not supported for this platform.',
         );
     }
   }
+
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: 'AIzaSyASENQp-oWxjR9OUwQgukpnrpjTDlAOxBU',
+    appId: '1:878190453723:web:0fb19e12ddb87633313dfe',
+    messagingSenderId: '878190453723',
+    projectId: 'mclv-musicapp',
+    authDomain: 'mclv-musicapp.firebaseapp.com',
+    storageBucket: 'mclv-musicapp.firebasestorage.app',
+    measurementId: 'G-D64FBDV72X',
+  );
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyB5v5LYSC-lekDpHx9wNq0lw20Gep-wxWQ',
@@ -43,5 +65,24 @@ class DefaultFirebaseOptions {
     projectId: 'mclv-musicapp',
     storageBucket: 'mclv-musicapp.firebasestorage.app',
     iosBundleId: 'com.example.musicapp',
+  );
+
+  static const FirebaseOptions macos = FirebaseOptions(
+    apiKey: 'AIzaSyA2-Y4Ie9hx0wb5DHuJ124magcig2TY9jg',
+    appId: '1:878190453723:ios:e8bfc19e2b5f759f313dfe',
+    messagingSenderId: '878190453723',
+    projectId: 'mclv-musicapp',
+    storageBucket: 'mclv-musicapp.firebasestorage.app',
+    iosBundleId: 'com.example.musicapp',
+  );
+
+  static const FirebaseOptions windows = FirebaseOptions(
+    apiKey: 'AIzaSyASENQp-oWxjR9OUwQgukpnrpjTDlAOxBU',
+    appId: '1:878190453723:web:0582f71b80c42c1a313dfe',
+    messagingSenderId: '878190453723',
+    projectId: 'mclv-musicapp',
+    authDomain: 'mclv-musicapp.firebaseapp.com',
+    storageBucket: 'mclv-musicapp.firebasestorage.app',
+    measurementId: 'G-M9LDX93D9M',
   );
 }

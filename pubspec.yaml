@@ -22,10 +22,10 @@ dependencies:
   permission_handler: ^11.4.0
   palette_generator: ^0.3.0
   flutter_color: ^2.1.0
-  firebase_core: ^2.12.0
+  firebase_core: ^4.0.0
   font_awesome_flutter: ^10.1.0
-  cloud_firestore: ^4.8.0 
-  firebase_messaging: ^14.7.8 # Asegúrate de usar la última versión
+  cloud_firestore: ^6.0.0
+  firebase_messaging: ^16.0.0
   shared_preferences: ^2.5.2
   flutter_local_notifications: ^19.0.0
   path_provider: ^2.1.4
@@ -58,9 +58,6 @@ flutter:
   uses-material-design: true
   assets:
     - assets/image.png
-    - assets/adoracion.png
-    - assets/image4.png
-    - assets/worship.png
     - assets/sounds/metronome_tick.mp3
     - assets/icono.png
     - assets/Facebook.png
