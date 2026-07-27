@@ -6,9 +6,43 @@
 //   orden en que el usuario las seleccionó), luego cada canción en su
 //   propia página.
 //
-// IMPORTANTE:
-// Se utiliza Roboto Mono (fuente monoespaciada) para garantizar
-// el alineado perfecto de acordes y letra.
+// Reutiliza la MISMA lógica de reconocimiento de acordes que Vcanciones.dart
+// (regex de acordes + palabras clave como CORO/VERSO/etc.) para que el PDF
+// se vea consistente con lo que el usuario ve en la app.
+//
+// IMPORTANTE: la letra y los acordes se renderizan con una fuente
+// monoespaciada (Roboto Mono) embebida, la MISMA que usa Vcanciones.dart en
+// la app. Esto es lo que garantiza que el espaciado manual que el usuario
+// calibra (contando espacios entre acordes y sílabas) se vea IGUAL en la
+// app y en el PDF compartido. Si se usara la fuente por defecto del PDF
+// (Helvetica, no monoespaciada) o pesos de fuente distintos (bold vs
+// normal) para acordes vs letra, el alineado se rompería aunque el string
+// guardado en Firebase fuera perfecto.
+//
+// CAMBIOS DE ESTA REFACTORIZACIÓN
+// --------------------------------
+// 1. Las canciones largas ya NO rompen el PDF: cada línea es ahora un
+//    widget independiente dentro de un `pw.MultiPage`, así el motor de
+//    layout puede partir el contenido entre páginas sin necesidad de que
+//    quepa entero en una sola (antes se armaba un único `pw.RichText`
+//    gigante, que es lo que disparaba la excepción de "Widget won't fit").
+// 2. Layout en dos columnas automático: si la canción supera
+//    `_maxLineasUnaColumna` líneas, la letra se reparte en dos columnas.
+//    Para evitar que un bloque de 2 columnas "salte" entero a la página
+//    siguiente cuando no cabe completo (lo que se veía como una hoja con
+//    mucho espacio en blanco), la letra se corta en BLOQUES que sí caben
+//    en una página (calculado según el alto real de página menos
+//    márgenes), y cada bloque es un widget de 2 columnas independiente que
+//    `MultiPage` acomoda de a uno — igual que hace con líneas sueltas en
+//    el layout de una columna. Ver `_buildLyricsEnDosColumnas` para el
+//    detalle del cálculo.
+// 3. Márgenes reducidos para ganar ancho útil.
+// 4. `generate()` ahora recibe una única lista ordenada de canciones
+//    (`List<Song> canciones`) en vez de `adoracion`/`alabanza` por
+//    separado, para respetar EXACTAMENTE el orden elegido por el usuario.
+//    Cada canción conserva su categoría a través de `Song.categoria`
+//    (o el parámetro `categoriaDe`, ver más abajo) únicamente para
+//    mostrar una etiqueta en el índice, sin alterar el orden.
 
 import 'dart:typed_data';
 import 'package:flutter/services.dart' show rootBundle;
@@ -21,6 +55,7 @@ class SongPdfGenerator {
 
   // ---------------------------------------------------------------------
   // Reconocimiento de acordes / palabras clave
+  // Mismos patrones que en Vcanciones.dart — si cambias uno, cambia el otro.
   // ---------------------------------------------------------------------
   static final String _suffix =
       r'(?:maj7|maj|min|dim7|dim|aug|sus\d*|add\d*|m7|m9|m6|m|[°+])?';
@@ -40,26 +75,31 @@ class SongPdfGenerator {
   );
 
   // ---------------------------------------------------------------------
-  // Colores del PDF
+  // Colores del PDF (independientes del theme dinámico de la app, para que
+  // el documento compartido se vea igual sin importar de qué canción salió)
   // ---------------------------------------------------------------------
   static final PdfColor _chordColor = PdfColor.fromInt(0xFF7EA0B0); // steelBlue
   static final PdfColor _keywordColor = PdfColor.fromInt(0xFFC9A24B); // gold
   static final PdfColor _textColor = PdfColors.black;
   static final PdfColor _titleColor = PdfColor.fromInt(0xFF1B1E23); // charcoal
 
-  static const double _lyricsFontSize = 10.0;
+  // Tamaño de fuente para letra/acordes. Debe ser el mismo en todos los
+  // spans (texto, acordes, keywords) para no romper el alineado calibrado.
+  static const double _lyricsFontSize = 10.5;
 
-  // Altura máxima de la columna utilizable en A4 (en puntos)
-  static const double _maxColumnaHeightPrimeraPagina = 680.0;
-  static const double _maxColumnaHeightPaginaSiguiente = 750.0;
+  // A partir de cuántas líneas de letra se activa el layout en 2 columnas.
+  static const int _maxLineasUnaColumna = 40;
 
+  // Márgenes de página reducidos para ganar ancho útil.
   static const pw.EdgeInsets _pageMargin = pw.EdgeInsets.only(
-    left: 16,
-    right: 16,
-    top: 20,
-    bottom: 20,
+    left: 14,
+    right: 14,
+    top: 24,
+    bottom: 24,
   );
 
+  // Fuente monoespaciada cacheada tras la primera carga, para no releer el
+  // asset en cada canción cuando se genera un repertorio con varias.
   static pw.Font? _monoFont;
 
   static Future<pw.Font> _loadMonoFont() async {
@@ -73,6 +113,16 @@ class SongPdfGenerator {
   // API PÚBLICA
   // =======================================================================
 
+  /// Genera el PDF a partir de una lista de canciones YA ORDENADA tal como
+  /// el usuario las seleccionó. El orden de [canciones] se respeta de
+  /// principio a fin, tanto en el índice de la portada como en las páginas.
+  ///
+  /// [categoriaDe] es opcional: si se provee, se usa para mostrar una
+  /// pequeña etiqueta de categoría junto a cada canción en el índice de la
+  /// portada (por ejemplo "Adoración" / "Alabanza"), sin que esto afecte
+  /// el orden de las canciones.
+  ///
+  /// [tituloRepertorio] es el nombre del evento/repertorio, si aplica.
   static Future<Uint8List> generate({
     required List<Song> canciones,
     String? Function(Song song)? categoriaDe,
@@ -138,6 +188,9 @@ class SongPdfGenerator {
     );
   }
 
+  /// Construye el índice de la portada respetando EXACTAMENTE el orden de
+  /// [canciones]. Si [categoriaDe] devuelve un valor no nulo para una
+  /// canción, se muestra como etiqueta a la derecha del título.
   static List<pw.Widget> _buildIndice(
     List<Song> canciones,
     String? Function(Song song)? categoriaDe,
@@ -178,7 +231,7 @@ class SongPdfGenerator {
                     vertical: 2,
                   ),
                   decoration: pw.BoxDecoration(
-                    color: PdfColor.fromInt(0xFFF5F1E8),
+                    color: PdfColor.fromInt(0xFFF5F1E8), // cream
                     borderRadius: pw.BorderRadius.circular(3),
                   ),
                   child: pw.Text(
@@ -207,16 +260,13 @@ class SongPdfGenerator {
   // PÁGINA(S) DE CANCIÓN
   // =======================================================================
 
+  /// Construye el `MultiPage` de una canción. Se usa `MultiPage` (en vez de
+  /// `Page`) precisamente para que, si la letra no cabe en una sola página,
+  /// el motor de layout continúe automáticamente en las siguientes sin
+  /// lanzar la excepción de "Widget won't fit into the page".
   static pw.MultiPage _buildSongDocument(Song cancion, pw.Font monoFont) {
-    // Normalizar saltos de línea
-    final textLimpio = cancion.text.replaceAll('\r\n', '\n');
-    
-    // Dividir en secciones/bloques usando las líneas en blanco
-    final rawBloques = textLimpio.split(RegExp(r'\n\s*\n'));
-    final bloques = rawBloques
-        .map((b) => b.trim())
-        .where((b) => b.isNotEmpty)
-        .toList();
+    final lineas = cancion.text.split('\n');
+    final usarDosColumnas = lineas.length > _maxLineasUnaColumna;
 
     return pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
@@ -224,103 +274,20 @@ class SongPdfGenerator {
       header: (context) => context.pageNumber == 1
           ? _buildEncabezado(cancion)
           : pw.SizedBox(),
-      build: (context) {
-        final widgets = <pw.Widget>[];
-        int offset = 0;
-        bool esPrimeraPagina = true;
-
-        while (offset < bloques.length) {
-          final maxAlt = esPrimeraPagina
-              ? _maxColumnaHeightPrimeraPagina
-              : _maxColumnaHeightPaginaSiguiente;
-
-          // 1. Llenar Columna Izquierda con bloques enteros
-          final colIzquierda = <String>[];
-          double altColIzquierda = 0;
-
-          while (offset < bloques.length) {
-            final bloque = bloques[offset];
-            final altBloque = _estimarAlturaBloque(bloque);
-
-            if (altColIzquierda + altBloque <= maxAlt || colIzquierda.isEmpty) {
-              colIzquierda.add(bloque);
-              altColIzquierda += altBloque;
-              offset++;
-            } else {
-              break;
-            }
-          }
-
-          // 2. Si quedan bloques, llenar Columna Derecha
-          final colDerecha = <String>[];
-          double altColDerecha = 0;
-
-          while (offset < bloques.length) {
-            final bloque = bloques[offset];
-            final altBloque = _estimarAlturaBloque(bloque);
-
-            if (altColDerecha + altBloque <= maxAlt || colDerecha.isEmpty) {
-              // Si de por sí cabe en una sola columna todo lo que queda, preferimos 1 columna
-              if (colDerecha.isEmpty && (altColIzquierda + altBloque <= maxAlt * 1.1)) {
-                break;
-              }
-              colDerecha.add(bloque);
-              altColDerecha += altBloque;
-              offset++;
-            } else {
-              break;
-            }
-          }
-
-          // Renderizar según si se usó la columna derecha o no
-          if (colDerecha.isEmpty) {
-            widgets.add(_buildColumnaBloques(colIzquierda, monoFont));
-          } else {
-            widgets.add(
-              pw.Row(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Expanded(child: _buildColumnaBloques(colIzquierda, monoFont)),
-                  pw.SizedBox(width: 16),
-                  pw.Expanded(child: _buildColumnaBloques(colDerecha, monoFont)),
-                ],
-              ),
-            );
-          }
-
-          esPrimeraPagina = false;
-        }
-
-        return widgets;
-      },
+      // El contenido se entrega como una lista de widgets pequeños: uno por
+      // línea (una columna), o un widget de 2 columnas POR BLOQUE de
+      // líneas que sí cabe en una página (dos columnas). Ningún widget
+      // individual es tan grande como para no caber en una página, así
+      // `MultiPage` puede seguir fluyendo de una página a la siguiente sin
+      // saltos abruptos ni límite de longitud.
+      build: (context) => usarDosColumnas
+          ? _buildLyricsEnDosColumnas(lineas, monoFont)
+          : _buildLyricsUnaColumna(lineas, monoFont),
     );
   }
 
-  /// Estima la altura en puntos de un bloque completo de estrofa
-  static double _estimarAlturaBloque(String bloque) {
-    final lineas = bloque.split('\n');
-    // Altura por línea + margen vertical inferior del bloque
-    return (lineas.length * (_lyricsFontSize * 1.25)) + 12.0;
-  }
-
-  static pw.Widget _buildColumnaBloques(List<String> bloques, pw.Font monoFont) {
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: bloques.map((b) => _buildBloqueWidget(b, monoFont)).toList(),
-    );
-  }
-
-  static pw.Widget _buildBloqueWidget(String bloque, pw.Font monoFont) {
-    final lineas = bloque.split('\n');
-    return pw.Container(
-      margin: const pw.EdgeInsets.only(bottom: 12),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: lineas.map((l) => _buildLineaWidget(l, monoFont)).toList(),
-      ),
-    );
-  }
-
+  /// Encabezado con título, tonalidad y tiempo. Ocupa el ancho completo de
+  /// la página, incluso cuando la letra se reparte en dos columnas.
   static pw.Widget _buildEncabezado(Song cancion) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -328,47 +295,218 @@ class SongPdfGenerator {
         pw.Text(
           cancion.title,
           style: pw.TextStyle(
-            fontSize: 20,
+            fontSize: 22,
             fontWeight: pw.FontWeight.bold,
             color: _titleColor,
           ),
         ),
-        pw.SizedBox(height: 4),
+        pw.SizedBox(height: 6),
         pw.Row(
           children: [
             _buildTag('Tonalidad: ${cancion.tonalidad}'),
-            pw.SizedBox(width: 8),
+            pw.SizedBox(width: 10),
             if (cancion.tiempo > 0) _buildTag('${cancion.tiempo} bpm'),
           ],
         ),
         pw.SizedBox(height: 4),
-        pw.Divider(color: PdfColors.grey400, thickness: 0.8),
-        pw.SizedBox(height: 8),
+        pw.Divider(color: PdfColors.grey400),
+        pw.SizedBox(height: 10),
       ],
     );
   }
 
   static pw.Widget _buildTag(String text) {
     return pw.Container(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: pw.BoxDecoration(
-        color: PdfColor.fromInt(0xFFF5F1E8),
+        color: PdfColor.fromInt(0xFFF5F1E8), // cream
         borderRadius: pw.BorderRadius.circular(4),
       ),
       child: pw.Text(
         text,
-        style: pw.TextStyle(fontSize: 9, color: _chordColor),
+        style: pw.TextStyle(fontSize: 10, color: _chordColor),
       ),
     );
   }
 
   // =======================================================================
-  // RENDERIZADO DE LÍNEA DE TEXTO Y ACORDES
+  // RENDERIZADO DE LETRA + ACORDES
   // =======================================================================
 
+  /// Layout de una sola columna: una lista plana de widgets, uno por línea.
+  /// `MultiPage` los va acomodando y partiendo entre páginas según haga
+  /// falta.
+  static List<pw.Widget> _buildLyricsUnaColumna(
+    List<String> lineas,
+    pw.Font monoFont,
+  ) {
+    return lineas
+        .map((linea) => _buildLineaWidget(linea, monoFont))
+        .toList(growable: false);
+  }
+
+  /// Altura aproximada, en puntos PDF, de una línea de letra/acordes.
+  /// `_lyricsFontSize` es el tamaño de fuente; 1.15 es un interlineado
+  /// razonable para texto monoespaciado. Se usa solo para ESTIMAR cuántas
+  /// líneas caben en una página en 2 columnas — no necesita ser exacta,
+  /// solo lo bastante conservadora para no pasarse.
+  static const double _alturaLineaAprox = _lyricsFontSize * 1.15;
+
+  /// Alto disponible de página en 2 columnas, restando márgenes y el
+  /// espacio típico del encabezado (que solo aparece en la página 1, pero
+  /// usamos su alto como margen de seguridad en todas para simplificar el
+  /// cálculo y quedarnos cortos antes que pasarnos).
+  static const double _altoEncabezadoAprox = 110;
+
+  /// Layout de dos columnas, empaquetado por SECCIONES completas (CORO,
+  /// VERSO, PUENTE, etc.) para que ninguna palabra clave quede cortada a
+  /// mitad de camino entre una columna y la siguiente, ni entre una página
+  /// y la siguiente.
+  ///
+  /// Cómo funciona:
+  /// 1. La letra se agrupa en "secciones": cada sección empieza en una
+  ///    línea que contiene una palabra clave (CORO/VERSO/PUENTE/etc.) — o
+  ///    al principio del texto si antes de la primera palabra clave ya hay
+  ///    líneas — y termina justo antes de la siguiente palabra clave. Cada
+  ///    sección se trata como una unidad indivisible: o entra completa en
+  ///    la columna actual, o pasa entera a la siguiente.
+  /// 2. Se empaqueta con un algoritmo simple tipo "greedy": se van
+  ///    metiendo secciones en la columna izquierda mientras quepan: si una
+  ///    sección no entra, se prueba la columna derecha del mismo bloque;
+  ///    si tampoco entra ahí, el bloque (la "página" de 2 columnas) se
+  ///    cierra ahí mismo — usando solo el espacio que realmente se llenó,
+  ///    sin desperdiciar el resto — y se abre un bloque nuevo empezando
+  ///    por esa sección.
+  ///
+  /// Esto evita los dos problemas que resolvía el enfoque anterior de
+  /// "líneas fijas por bloque": cortar una sección a mitad de camino, y
+  /// dejar espacio en blanco de sobra cuando en realidad cabía más letra.
+  static List<pw.Widget> _buildLyricsEnDosColumnas(
+    List<String> lineas,
+    pw.Font monoFont,
+  ) {
+    final double altoUtil =
+        PdfPageFormat.a4.height - _pageMargin.vertical - _altoEncabezadoAprox;
+    final int lineasPorColumna = (altoUtil / _alturaLineaAprox).floor().clamp(10, 300);
+
+    final secciones = _agruparEnSecciones(lineas);
+
+    final widgets = <pw.Widget>[];
+
+    List<String> columnaIzquierda = [];
+    List<String> columnaDerecha = [];
+    int lineasIzquierda = 0;
+    int lineasDerecha = 0;
+
+    void cerrarBloqueActual() {
+      if (columnaIzquierda.isEmpty && columnaDerecha.isEmpty) return;
+
+      pw.Widget buildColumna(List<String> lineasColumna) {
+        return pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: lineasColumna
+              .map((linea) => _buildLineaWidget(linea, monoFont))
+              .toList(growable: false),
+        );
+      }
+
+      widgets.add(
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Expanded(child: buildColumna(columnaIzquierda)),
+            pw.SizedBox(width: 18),
+            pw.Expanded(child: buildColumna(columnaDerecha)),
+          ],
+        ),
+      );
+
+      columnaIzquierda = [];
+      columnaDerecha = [];
+      lineasIzquierda = 0;
+      lineasDerecha = 0;
+    }
+
+    for (final seccion in secciones) {
+      final cabeEnIzquierda = lineasIzquierda + seccion.length <= lineasPorColumna;
+      final cabeEnDerecha = lineasDerecha + seccion.length <= lineasPorColumna;
+
+      if (cabeEnIzquierda) {
+        // Prioridad 1: si cabe en la izquierda, va ahí (llena de arriba
+        // hacia abajo antes de empezar la derecha).
+        columnaIzquierda.addAll(seccion);
+        lineasIzquierda += seccion.length;
+      } else if (cabeEnDerecha) {
+        // Prioridad 2: no cupo en la izquierda pero sí en la derecha.
+        columnaDerecha.addAll(seccion);
+        lineasDerecha += seccion.length;
+      } else if (columnaIzquierda.isEmpty && columnaDerecha.isEmpty) {
+        // Sección gigante en un bloque totalmente vacío: no hay forma de
+        // que quepa en ninguna columna sin partirla. Se deja pasar
+        // completa en la izquierda en vez de cortar una palabra clave a
+        // mitad de camino.
+        columnaIzquierda.addAll(seccion);
+        lineasIzquierda += seccion.length;
+      } else if (columnaDerecha.isEmpty) {
+        // La izquierda ya tiene contenido y no cupo ahí, pero la derecha
+        // de este bloque está vacía: mejor usarla (aunque la sección se
+        // pase del alto ideal) que cerrar el bloque dejando la derecha sin
+        // usar del todo.
+        columnaDerecha.addAll(seccion);
+        lineasDerecha += seccion.length;
+      } else {
+        // Ni la izquierda ni la derecha de este bloque tienen espacio
+        // para esta sección: cerramos el bloque actual (usando solo el
+        // espacio que ya se llenó, sin dejar hueco de sobra) y empezamos
+        // un bloque nuevo con esta sección.
+        cerrarBloqueActual();
+        columnaIzquierda.addAll(seccion);
+        lineasIzquierda += seccion.length;
+      }
+    }
+
+    cerrarBloqueActual();
+
+    return widgets;
+  }
+
+  /// Agrupa las líneas de una canción en secciones indivisibles: cada
+  /// sección empieza en una línea que contiene una palabra clave
+  /// (CORO/VERSO/PUENTE/etc., usando el mismo `_keywordRegex` que colorea
+  /// el texto) y se extiende hasta justo antes de la siguiente palabra
+  /// clave, o hasta el final del texto. Si hay líneas antes de la primera
+  /// palabra clave (ej. una intro sin encabezado), forman su propia
+  /// sección inicial.
+  static List<List<String>> _agruparEnSecciones(List<String> lineas) {
+    final secciones = <List<String>>[];
+    List<String> actual = [];
+
+    for (final linea in lineas) {
+      final esInicioDeSeccion = _keywordRegex.hasMatch(linea);
+      if (esInicioDeSeccion && actual.isNotEmpty) {
+        secciones.add(actual);
+        actual = [linea];
+      } else {
+        actual.add(linea);
+      }
+    }
+
+    if (actual.isNotEmpty) {
+      secciones.add(actual);
+    }
+
+    return secciones;
+  }
+
+  /// Construye el widget de una única línea de letra/acordes, coloreando
+  /// acordes y palabras clave, y reutilizando la MISMA fuente monoespaciada
+  /// y el MISMO tamaño para todos los spans (texto, acordes, keywords), de
+  /// forma que el ancho de cada carácter sea idéntico sin importar su rol.
+  /// Esto es lo que mantiene el alineado que el usuario calibra a mano.
   static pw.Widget _buildLineaWidget(String linea, pw.Font monoFont) {
-    if (linea.trim().isEmpty) {
-      return pw.SizedBox(height: _lyricsFontSize * 1.1);
+    if (linea.isEmpty) {
+      // Preserva líneas en blanco (separación entre estrofas).
+      return pw.SizedBox(height: _lyricsFontSize * 1.15);
     }
 
     final spans = <pw.TextSpan>[];

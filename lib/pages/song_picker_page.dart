@@ -2,8 +2,8 @@
 //
 // Permite elegir una o varias canciones (mezclando Adoración y Alabanza)
 // para armar un "medley/repertorio compartido": un PDF con portada +
-// todas las canciones separadas por categoría y ordenadas alfabéticamente,
-// o el texto plano equivalente vía share_plus.
+// todas las canciones en el MISMO orden en que el usuario las fue
+// seleccionando, o el texto plano equivalente vía share_plus.
 //
 // Cada canción seleccionada puede transponerse individualmente SOLO para
 // esta exportación (PDF/texto) — el ajuste vive únicamente en esta
@@ -39,7 +39,12 @@ class _SongPickerPageState extends State<SongPickerPage>
   List<Song> _alabanza = [];
   bool _cargando = true;
 
-  // Selección por título (para no perderla al cambiar de pestaña)
+  // Selección por título (para no perderla al cambiar de pestaña).
+  // IMPORTANTE: en Dart, un Map (LinkedHashMap por defecto) preserva el
+  // orden de INSERCIÓN de sus claves. Esto es lo que usamos como fuente de
+  // verdad del orden en que el usuario fue tocando canciones — NUNCA hay
+  // que reconstruir el orden desde _adoracion/_alabanza (que están
+  // ordenadas alfabéticamente), o se pierde el orden real de selección.
   final Map<String, Song> _seleccionadas = {};
 
   // Semitonos de transposición SOLO para esta exportación, por título de
@@ -59,6 +64,9 @@ class _SongPickerPageState extends State<SongPickerPage>
   }
 
   /// Ordena alfabéticamente por título (ignorando acentos/mayúsculas).
+  /// Esto es solo para las LISTAS QUE SE MUESTRAN en pantalla (para que
+  /// sea fácil encontrar una canción) — no tiene relación con el orden en
+  /// que se comparte el PDF/texto.
   List<Song> _ordenar(List<Song> lista) {
     final copia = List<Song>.from(lista);
     copia.sort((a, b) => a.title.toUpperCase().compareTo(b.title.toUpperCase()));
@@ -126,22 +134,21 @@ class _SongPickerPageState extends State<SongPickerPage>
     );
   }
 
-  /// Divide las canciones seleccionadas en dos listas ya ordenadas
-  /// (siguiendo el orden alfabético de _adoracion/_alabanza), con la
-  /// transposición de cada una ya aplicada, listas para el PDF/texto.
-  List<Song> _seleccionadasDe(List<Song> categoria) {
-    final titulos = _seleccionadas.keys.toSet();
-    return categoria
-        .where((s) => titulos.contains(s.title))
-        .map(_conTransposicionAplicada)
-        .toList();
+  /// Devuelve TODAS las canciones seleccionadas en el ORDEN REAL en que el
+  /// usuario las fue tocando (orden de inserción de `_seleccionadas`), con
+  /// la transposición de cada una ya aplicada. Esta es la única fuente que
+  /// debe alimentar el PDF y el texto compartido — reemplaza al viejo
+  /// `_seleccionadasDe()`, que reconstruía el orden desde las listas
+  /// alfabéticas (_adoracion/_alabanza) y por eso perdía el orden real de
+  /// selección del usuario.
+  List<Song> _seleccionadasEnOrden() {
+    return _seleccionadas.values.map(_conTransposicionAplicada).toList();
   }
 
   Future<void> _compartirComoPdf() async {
     if (_seleccionadas.isEmpty) return;
-    final adoracionSel = _seleccionadasDe(_adoracion);
-    final alabanzaSel = _seleccionadasDe(_alabanza);
-    final total = adoracionSel.length + alabanzaSel.length;
+    final seleccionadasEnOrden = _seleccionadasEnOrden();
+    final total = seleccionadasEnOrden.length;
 
     // Siempre preguntamos el título (aunque sea una sola canción), porque
     // el caso de uso típico es "arma el repertorio para tal evento".
@@ -155,16 +162,15 @@ class _SongPickerPageState extends State<SongPickerPage>
     );
 
     try {
-      final todasSeleccionadas = [...adoracionSel, ...alabanzaSel];
       final bytes = await SongPdfGenerator.generate(
-        canciones: todasSeleccionadas,
+        canciones: seleccionadasEnOrden,
         categoriaDe: (song) => song.categoria,
         tituloRepertorio: titulo,
       );
       if (!mounted) return;
       Navigator.pop(context); // cierra el loading
 
-      final primeraCancion = adoracionSel.isNotEmpty ? adoracionSel.first : alabanzaSel.first;
+      final primeraCancion = seleccionadasEnOrden.first;
       final nombreArchivo = titulo.isNotEmpty
           ? '${_slug(titulo)}.pdf'
           : total == 1
@@ -184,7 +190,7 @@ class _SongPickerPageState extends State<SongPickerPage>
 
   Future<void> _compartirComoTexto() async {
     if (_seleccionadas.isEmpty) return;
-    final canciones = [..._seleccionadasDe(_adoracion), ..._seleccionadasDe(_alabanza)];
+    final canciones = _seleccionadasEnOrden();
 
     final buffer = StringBuffer();
     for (final s in canciones) {
