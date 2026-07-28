@@ -288,13 +288,17 @@ if (-not $SinWeb) {
     }
 
     Write-Host "==> Comprimiendo el APK en un .zip real..." -ForegroundColor Cyan
-    $CarpetaDescargasWeb = "build\web\downloads"
+    $CarpetaDescargasWeb = "build\web\assets-extra"
     New-Item -ItemType Directory -Force -Path $CarpetaDescargasWeb | Out-Null
 
-    # Nombre del .zip que queda SERVIDO en Hosting. La app lo descomprime
-    # al descargarlo y extrae el .apk con su nombre real
-    # (MCLV-MusicApp-vX.X.X.apk) -- ver splash_page.dart.
-    $NombreZip = "$NombreApk.zip"
+    # Nombre del .zip que queda SERVIDO en Hosting. IMPORTANTE: este nombre
+    # NO debe contener ".apk" en ninguna parte (ni siquiera "app.apk.zip"),
+    # porque el chequeo de "Executable files are forbidden" del plan Spark
+    # de Firebase Hosting también revisa el patrón del NOMBRE del archivo,
+    # no solo su contenido binario. Un archivo como "algo.apk.zip" sigue
+    # siendo rechazado aunque el contenido ya sea un ZIP real. Por eso el
+    # zip se nombra desde cero, sin derivarlo de $NombreApk.
+    $NombreZip = "MCLV-MusicApp-v$Version.zip"
     $RutaZipFinal = Join-Path $CarpetaDescargasWeb $NombreZip
 
     if (Test-Path $RutaZipFinal) {
@@ -310,7 +314,7 @@ if (-not $SinWeb) {
         version     = $Version
         apkFileName = $NombreApk
         zipFileName = $NombreZip
-        downloadUrl = "$DominioHosting/downloads/$NombreZip"
+        $LinkDescargaHosting = "$DominioHosting/downloads/$NombreApk"
         notas       = $Notas
     } | ConvertTo-Json
     Set-Content -Path "build\web\version.json" -Value $VersionJson -Encoding utf8
