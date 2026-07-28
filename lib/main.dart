@@ -5,20 +5,26 @@ import 'utils/app_theme.dart';
 import 'utils/theme_controller.dart';
 import 'firebase_options.dart';
 import 'notification_bootstrap.dart';
+import 'models/song_repository.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
-  
-  // En Android/iOS esto inicializa notificaciones push + locales. En web es
-  // un no-op (ver notification_bootstrap.dart) — así firebase_messaging
-  // nunca se compila para el target web, donde su paquete web no es
-  // compatible con el SDK de Dart actual.
-  await NotificationBootstrap.init();
 
+  await NotificationBootstrap.init();
   await ThemeController.instance.load();
+
+  // Precarga las canciones de ambas categorías en segundo plano ni bien
+  // arranca la app -- SIN await, para no bloquear el splash ni la
+  // navegación. syncFromFirestore ya guarda el resultado en caché local
+  // (SharedPreferences) antes de devolver, así que cuando el usuario
+  // entre a CategoriaPage o al picker de compartir (SongPickerPage),
+  // loadFromCache() ya encuentra la versión más reciente, sin tener que
+  // esperar un nuevo fetch en ese momento.
+  SongRepository.instance.syncFromFirestore('adoracion');
+  SongRepository.instance.syncFromFirestore('alabanza');
 
   runApp(const MclvMusicApp());
 }

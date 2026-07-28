@@ -8,7 +8,6 @@ import 'package:http/http.dart' as http;
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../utils/app_theme.dart';
 import '../utils/song_pdf_generator.dart';
