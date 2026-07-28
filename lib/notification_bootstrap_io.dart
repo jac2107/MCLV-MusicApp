@@ -56,7 +56,13 @@ class NotificationBootstrap {
       sound: true,
     );
     debugPrint('[NotificationBootstrap] Permiso de notificaciones: ${settings.authorizationStatus}');
-  }
+    // Suscribe a este dispositivo al topic "actualizaciones", el canal fijo
+    // que usamos para avisar de nuevas versiones del APK. Al ser un topic (no
+    // un token individual), el script de publicación puede mandar un mensaje
+    // a TODOS los dispositivos suscritos con una sola llamada a la API de
+    // FCM, sin necesitar la lista de tokens de cada teléfono.
+    await FirebaseMessaging.instance.subscribeToTopic('actualizaciones');
+      }
 
   static void _handleNotification(RemoteMessage message) {
     if (message.data['url'] != null && message.data['url']!.isNotEmpty) {
