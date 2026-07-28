@@ -106,7 +106,21 @@ class SplashScreenState extends State<SplashScreen>
       ),
     );
   }
-
+void _mostrarDialogoCargando() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Expanded(child: Text('Descargando actualización...')),
+          ],
+        ),
+      ),
+    );
+  }
   void _mostrarDialogoActualizacion(InfoVersionNueva info) {
     showDialog(
       context: context,
@@ -129,7 +143,9 @@ class SplashScreenState extends State<SplashScreen>
           FilledButton(
             onPressed: () async {
               Navigator.of(context).pop();
+              _mostrarDialogoCargando();
               await _descargarEInstalar(info);
+              if (mounted) Navigator.of(context).pop(); // cierra el diálogo de carga
               _navegarAHome();
             },
             child: const Text('Descargar'),

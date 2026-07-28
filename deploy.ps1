@@ -172,6 +172,19 @@ git rev-parse --is-inside-work-tree 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Fallar "Esta carpeta no es un repositorio Git. Verifica que estás en la raíz del proyecto."
 }
+# ---------------------------------------------------------------------
+# 3.5. Sincronizar pubspec.yaml con la versión del release
+# ---------------------------------------------------------------------
+Write-Host "==> Actualizando version en pubspec.yaml..." -ForegroundColor Cyan
+
+$pubspecContent = Get-Content "pubspec.yaml" -Raw
+$buildNumberActual = if ($pubspecContent -match "version:\s*[\d\.\-\w]+\+(\d+)") { [int]$Matches[1] } else { 0 }
+$buildNumberNuevo = $buildNumberActual + 1
+
+$pubspecContent = $pubspecContent -replace "version:\s*[\d\.\-\w]+\+\d+", "version: $Version+$buildNumberNuevo"
+Set-Content -Path "pubspec.yaml" -Value $pubspecContent -NoNewline
+
+Write-Host "==> pubspec.yaml actualizado a version: $Version+$buildNumberNuevo" -ForegroundColor Green
 
 # ---------------------------------------------------------------------
 # 2. Commit + push de cambios pendientes (si los hay)
