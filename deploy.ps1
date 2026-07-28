@@ -259,10 +259,24 @@ $RutaApkFinal = Join-Path $CarpetaTemporal $NombreApk
 Copy-Item -Path $RutaApkOriginal -Destination $RutaApkFinal -Force
 
 # ---------------------------------------------------------------------
-# 6. Web: build, COPIAR el APK dentro de build/web/downloads/, y deploy
-#    a Firebase Hosting. El orden importa: el build web se hace DESPUÉS
-#    de tener el APK ya listo, para poder copiarlo dentro de build/web
-#    (que es justo la carpeta que Hosting despliega) ANTES del deploy.
+# 6. Web: build, COPIAR el APK (renombrado, ver nota abajo) y generar
+#    version.json dentro de build/web/, y deploy a Firebase Hosting.
+#
+# POR QUÉ EL APK SE RENOMBRA A .zip:
+# El plan Spark (gratuito) de Firebase Hosting rechaza archivos detectados
+# como ejecutables -- un .apk cae en esa categoría y el deploy falla con
+# "Executable files are forbidden on the Spark billing plan". Firebase
+# Storage sería la alternativa normal, pero también requiere el plan de
+# pago (Blaze). La solución sin subir de plan: subir el mismo archivo con
+# extensión .zip (Hosting no lo bloquea), y que la APP (no un link directo)
+# lo descargue y lo guarde con el nombre .apk real usando el paquete
+# `http` + `path_provider` -- ver el cambio correspondiente en
+# splash_page.dart.
+#
+# POR QUÉ SE GENERA version.json:
+# Es el archivo que la app consulta al abrir (en SplashScreen) para saber
+# si hay una versión más nueva que la instalada. Contiene el número de
+# versión y el nombre del archivo a descargar.
 # ---------------------------------------------------------------------
 if (-not $SinWeb) {
     Write-Host "==> Compilando web (flutter build web)..." -ForegroundColor Cyan
@@ -271,10 +285,25 @@ if (-not $SinWeb) {
         Fallar "flutter build web falló. Revisa el error de arriba."
     }
 
-    Write-Host "==> Copiando $NombreApk a build/web/downloads/..." -ForegroundColor Cyan
+    Write-Host "==> Preparando descarga del APK (renombrado a .zip)..." -ForegroundColor Cyan
     $CarpetaDescargasWeb = "build\web\downloads"
     New-Item -ItemType Directory -Force -Path $CarpetaDescargasWeb | Out-Null
-    Copy-Item -Path $RutaApkFinal -Destination (Join-Path $CarpetaDescargasWeb $NombreApk) -Force
+
+    # Nombre con el que el archivo queda SERVIDO en Hosting (no ejecutable,
+    # así Firebase no lo bloquea). El nombre final que verá el usuario al
+    # instalar (MCLV-MusicApp-vX.X.X.apk) se restaura dentro de la app al
+    # guardarlo en el teléfono -- ver splash_page.dart.
+    $NombreApkServido = "$NombreApk.zip"
+    Copy-Item -Path $RutaApkFinal -Destination (Join-Path $CarpetaDescargasWeb $NombreApkServido) -Force
+
+    Write-Host "==> Generando version.json..." -ForegroundColor Cyan
+    $VersionJson = @{
+        version     = $Version
+        apkFileName = $NombreApk
+        downloadUrl = "$DominioHosting/downloads/$NombreApkServido"
+        notas       = $Notas
+    } | ConvertTo-Json
+    Set-Content -Path "build\web\version.json" -Value $VersionJson -Encoding utf8
 
     Write-Host "==> Desplegando a Firebase Hosting..." -ForegroundColor Cyan
     firebase deploy --only hosting
@@ -282,7 +311,7 @@ if (-not $SinWeb) {
         Fallar "firebase deploy falló. Revisa el error de arriba."
     }
 
-    Write-Host "==> Hosting actualizado correctamente (incluye el APK)." -ForegroundColor Green
+    Write-Host "==> Hosting actualizado correctamente (incluye el APK y version.json)." -ForegroundColor Green
 } else {
     Write-Host "==> Saltando build/deploy de web (-SinWeb)." -ForegroundColor Yellow
 }
