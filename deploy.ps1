@@ -259,24 +259,26 @@ $RutaApkFinal = Join-Path $CarpetaTemporal $NombreApk
 Copy-Item -Path $RutaApkOriginal -Destination $RutaApkFinal -Force
 
 # ---------------------------------------------------------------------
-# 6. Web: build, COPIAR el APK (renombrado, ver nota abajo) y generar
-#    version.json dentro de build/web/, y deploy a Firebase Hosting.
+# 6. Web: build, COMPRIMIR el APK en un .zip REAL y generar version.json
+#    dentro de build/web/, y deploy a Firebase Hosting.
 #
-# POR QUÉ EL APK SE RENOMBRA A .zip:
+# POR QUÉ EL APK SE COMPRIME EN UN .ZIP REAL (no solo renombrado):
 # El plan Spark (gratuito) de Firebase Hosting rechaza archivos detectados
-# como ejecutables -- un .apk cae en esa categoría y el deploy falla con
-# "Executable files are forbidden on the Spark billing plan". Firebase
-# Storage sería la alternativa normal, pero también requiere el plan de
-# pago (Blaze). La solución sin subir de plan: subir el mismo archivo con
-# extensión .zip (Hosting no lo bloquea), y que la APP (no un link directo)
-# lo descargue y lo guarde con el nombre .apk real usando el paquete
-# `http` + `path_provider` -- ver el cambio correspondiente en
-# splash_page.dart.
+# como ejecutables -- esto se basa en el CONTENIDO/firma binaria del
+# archivo, no en su extensión. Simplemente renombrar app.apk a app.apk.zip
+# NO evita el bloqueo, porque los bytes internos siguen siendo los de un
+# paquete Android ejecutable (esto se confirmó: el deploy seguía fallando
+# con el mismo error incluso con extensión .zip). La solución real es
+# comprimir el archivo de verdad con Compress-Archive: el resultado es un
+# ZIP genuino cuyo contenido, a nivel de bytes, ya no tiene la firma de un
+# ejecutable -- Firebase lo acepta sin problema. La app, al descargarlo,
+# lo DESCOMPRIME automáticamente (con el paquete `archive` de Dart) para
+# extraer el .apk real antes de instalarlo -- ver splash_page.dart.
 #
 # POR QUÉ SE GENERA version.json:
 # Es el archivo que la app consulta al abrir (en SplashScreen) para saber
 # si hay una versión más nueva que la instalada. Contiene el número de
-# versión y el nombre del archivo a descargar.
+# versión y el nombre del archivo .zip a descargar.
 # ---------------------------------------------------------------------
 if (-not $SinWeb) {
     Write-Host "==> Compilando web (flutter build web)..." -ForegroundColor Cyan
@@ -285,22 +287,30 @@ if (-not $SinWeb) {
         Fallar "flutter build web falló. Revisa el error de arriba."
     }
 
-    Write-Host "==> Preparando descarga del APK (renombrado a .zip)..." -ForegroundColor Cyan
+    Write-Host "==> Comprimiendo el APK en un .zip real..." -ForegroundColor Cyan
     $CarpetaDescargasWeb = "build\web\downloads"
     New-Item -ItemType Directory -Force -Path $CarpetaDescargasWeb | Out-Null
 
-    # Nombre con el que el archivo queda SERVIDO en Hosting (no ejecutable,
-    # así Firebase no lo bloquea). El nombre final que verá el usuario al
-    # instalar (MCLV-MusicApp-vX.X.X.apk) se restaura dentro de la app al
-    # guardarlo en el teléfono -- ver splash_page.dart.
-    $NombreApkServido = "$NombreApk.zip"
-    Copy-Item -Path $RutaApkFinal -Destination (Join-Path $CarpetaDescargasWeb $NombreApkServido) -Force
+    # Nombre del .zip que queda SERVIDO en Hosting. La app lo descomprime
+    # al descargarlo y extrae el .apk con su nombre real
+    # (MCLV-MusicApp-vX.X.X.apk) -- ver splash_page.dart.
+    $NombreZip = "$NombreApk.zip"
+    $RutaZipFinal = Join-Path $CarpetaDescargasWeb $NombreZip
+
+    if (Test-Path $RutaZipFinal) {
+        Remove-Item $RutaZipFinal -Force
+    }
+    # Compress-Archive crea un ZIP real (compresión DEFLATE estándar), a
+    # diferencia de un simple renombrado -- esto es lo que hace que
+    # Firebase Hosting ya no detecte un ejecutable dentro.
+    Compress-Archive -Path $RutaApkFinal -DestinationPath $RutaZipFinal -CompressionLevel Optimal
 
     Write-Host "==> Generando version.json..." -ForegroundColor Cyan
     $VersionJson = @{
         version     = $Version
         apkFileName = $NombreApk
-        downloadUrl = "$DominioHosting/downloads/$NombreApkServido"
+        zipFileName = $NombreZip
+        downloadUrl = "$DominioHosting/downloads/$NombreZip"
         notas       = $Notas
     } | ConvertTo-Json
     Set-Content -Path "build\web\version.json" -Value $VersionJson -Encoding utf8
@@ -311,7 +321,7 @@ if (-not $SinWeb) {
         Fallar "firebase deploy falló. Revisa el error de arriba."
     }
 
-    Write-Host "==> Hosting actualizado correctamente (incluye el APK y version.json)." -ForegroundColor Green
+    Write-Host "==> Hosting actualizado correctamente (incluye el APK comprimido y version.json)." -ForegroundColor Green
 } else {
     Write-Host "==> Saltando build/deploy de web (-SinWeb)." -ForegroundColor Yellow
 }

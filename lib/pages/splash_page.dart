@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:archive/archive.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -76,8 +77,12 @@ class SplashScreenState extends State<SplashScreen>
       final versionRemota = datos['version'] as String?;
       final downloadUrl = datos['downloadUrl'] as String?;
       final apkFileName = datos['apkFileName'] as String?;
+      final zipFileName = datos['zipFileName'] as String?;
 
-      if (versionRemota == null || downloadUrl == null || apkFileName == null) {
+      if (versionRemota == null ||
+          downloadUrl == null ||
+          apkFileName == null ||
+          zipFileName == null) {
         return;
       }
 
@@ -88,6 +93,7 @@ class SplashScreenState extends State<SplashScreen>
             version: versionRemota,
             downloadUrl: downloadUrl,
             apkFileName: apkFileName,
+            zipFileName: zipFileName,
             notas: datos['notas'] as String? ?? '',
           );
         });
@@ -201,16 +207,12 @@ class SplashScreenState extends State<SplashScreen>
     );
   }
 
-  /// Descarga el APK (servido como .zip para no chocar con la restricción
-  /// de Firebase Hosting sobre archivos ejecutables), lo guarda en el
-  /// teléfono con su nombre .apk REAL, y abre el instalador del sistema.
-  ///
-  /// Por qué esto vive en la app y no es un link directo: Firebase Hosting
-  /// (plan Spark) rechaza subir archivos .apk directamente. El archivo se
-  /// sirve con extensión .zip (que sí es aceptada), y es la app la que lo
-  /// descarga y lo renombra a .apk al guardarlo localmente -- el sistema
-  /// operativo Android decide qué hacer con el archivo por su contenido y
-  /// extensión final en disco, no por cómo se sirvió por HTTP.
+  /// Descarga el .zip (el APK real comprimido -- necesario porque Firebase
+  /// Hosting en el plan Spark rechaza subir archivos .apk directamente,
+  /// incluso solo renombrados; solo acepta el contenido si está realmente
+  /// comprimido), lo DESCOMPRIME en memoria para extraer el .apk real, lo
+  /// guarda en el teléfono, y abre el instalador del sistema. Todo esto es
+  /// automático -- el usuario nunca ve ni maneja el .zip directamente.
   Future<void> _descargarEInstalar(_InfoVersionNueva info) async {
     try {
       final respuesta = await http.get(Uri.parse(info.downloadUrl));
@@ -218,15 +220,25 @@ class SplashScreenState extends State<SplashScreen>
         throw Exception('No se pudo descargar (HTTP ${respuesta.statusCode})');
       }
 
+      // Descomprime el ZIP en memoria y busca el .apk dentro. Se busca por
+      // sufijo ".apk" en vez de asumir un único archivo en el ZIP, para no
+      // depender de que Compress-Archive (lado del script) mantenga
+      // siempre una estructura interna exacta.
+      final archivoZip = ZipDecoder().decodeBytes(respuesta.bodyBytes);
+      final archivoApk = archivoZip.files.firstWhere(
+        (f) => f.isFile && f.name.toLowerCase().endsWith('.apk'),
+        orElse: () => throw Exception('El .zip descargado no contiene un .apk'),
+      );
+
       final directorio = await getTemporaryDirectory();
       final rutaApk = '${directorio.path}/${info.apkFileName}';
       final archivo = File(rutaApk);
-      await archivo.writeAsBytes(respuesta.bodyBytes);
+      await archivo.writeAsBytes(archivoApk.content as List<int>);
 
-      // Abre el instalador nativo de Android para este APK. Requiere que
-      // el usuario ya haya dado permiso de "instalar apps desconocidas"
-      // para esta app la primera vez (Android lo pide automáticamente si
-      // falta).
+      // Abre el instalador nativo de Android para este APK ya extraído.
+      // Requiere que el usuario ya haya dado permiso de "instalar apps
+      // desconocidas" para esta app la primera vez (Android lo pide
+      // automáticamente si falta).
       final uri = Uri.file(rutaApk);
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri);
@@ -329,12 +341,14 @@ class _InfoVersionNueva {
   final String version;
   final String downloadUrl;
   final String apkFileName;
+  final String zipFileName;
   final String notas;
 
   _InfoVersionNueva({
     required this.version,
     required this.downloadUrl,
     required this.apkFileName,
+    required this.zipFileName,
     required this.notas,
   });
 }

@@ -35,6 +35,7 @@ dependencies:
   pdf: ^3.11.1          # generar el PDF de canciones/medleys
   printing: ^5.13.3     # vista previa e impartir el PDF generado
   package_info_plus: ^8.1.0
+  archive: ^3.6.1
   native_metronome:
       path: ./native_metronome
 
