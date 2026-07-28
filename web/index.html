@@ -33,6 +33,32 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script>
+    // Descarga el .zip, lo descomprime en el navegador, y dispara la
+    // descarga del .apk puro (el usuario nunca ve ni maneja el .zip).
+    async function descargarApkDesdeZip(zipUrl, apkFileName) {
+      const respuesta = await fetch(zipUrl);
+      if (!respuesta.ok) throw new Error('No se pudo descargar: ' + respuesta.status);
+      const zipBlob = await respuesta.blob();
+      const zip = await JSZip.loadAsync(zipBlob);
+
+      // Busca el primer archivo que termine en .apk dentro del zip.
+      const nombreEnZip = Object.keys(zip.files).find(n => n.toLowerCase().endsWith('.apk'));
+      if (!nombreEnZip) throw new Error('El zip no contiene un .apk');
+
+      const apkBlob = await zip.files[nombreEnZip].async('blob');
+      const url = URL.createObjectURL(apkBlob);
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = apkFileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

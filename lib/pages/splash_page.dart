@@ -1,20 +1,14 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:archive/archive.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:archive/archive.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 import 'home_page.dart';
 import '../utils/app_theme.dart';
-
-// URL del version.json que el script de deploy genera y publica en
-// Firebase Hosting junto con la web. Contiene la última versión publicada
-// y el nombre del archivo a descargar (ver deploy.ps1, paso 6).
-const String _kVersionCheckUrl = 'https://mclv-musicapp.web.app/version.json';
+import '../utils/version_checker.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -33,7 +27,7 @@ class SplashScreenState extends State<SplashScreen>
 
   // Info de una versión nueva encontrada en version.json, si la hay. Null
   // mientras se revisa, o si no hay ninguna más nueva que la instalada.
-  _InfoVersionNueva? _versionNueva;
+  InfoVersionNueva? _versionNueva;
 
   @override
   void initState() {
@@ -56,76 +50,14 @@ class SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _revisarVersionNueva() async {
-    // En web no tiene sentido ofrecer descargar un APK -- el usuario web
-    // ya está usando la versión más reciente por definición (Hosting
-    // siempre sirve el último deploy). kIsWeb evalúa en tiempo de
-    // compilación, así que Platform.isAndroid ni se ejecuta en web.
+    // El splash es solo el flujo de la app instalada (Android). En web
+    // este diálogo no aplica -- ahí el botón de descarga vive en
+    // HomePage, siempre visible, sin necesidad de comparar versiones.
     if (kIsWeb) return;
-    if (!Platform.isAndroid) return;
 
-    try {
-      final paqueteInfo = await PackageInfo.fromPlatform();
-      final versionInstalada = paqueteInfo.version; // ej. "1.0.0"
-
-      final respuesta = await http
-          .get(Uri.parse(_kVersionCheckUrl))
-          .timeout(const Duration(seconds: 5));
-
-      if (respuesta.statusCode != 200) return;
-
-      final datos = jsonDecode(respuesta.body) as Map<String, dynamic>;
-      final versionRemota = datos['version'] as String?;
-      final downloadUrl = datos['downloadUrl'] as String?;
-      final apkFileName = datos['apkFileName'] as String?;
-      final zipFileName = datos['zipFileName'] as String?;
-
-      if (versionRemota == null ||
-          downloadUrl == null ||
-          apkFileName == null ||
-          zipFileName == null) {
-        return;
-      }
-
-      if (_esVersionMasNueva(versionRemota, versionInstalada)) {
-        if (!mounted) return;
-        setState(() {
-          _versionNueva = _InfoVersionNueva(
-            version: versionRemota,
-            downloadUrl: downloadUrl,
-            apkFileName: apkFileName,
-            zipFileName: zipFileName,
-            notas: datos['notas'] as String? ?? '',
-          );
-        });
-      }
-    } catch (_) {
-      // Silencioso a propósito: cualquier fallo aquí (sin internet, JSON
-      // mal formado, timeout) no debe afectar el arranque normal de la
-      // app. El peor caso es simplemente que no se avisa de la
-      // actualización esta vez.
-    }
-  }
-
-  /// Compara dos versiones tipo "1.2.0" componente por componente
-  /// (mayor.menor.parche). Devuelve true si `remota` es estrictamente
-  /// mayor que `instalada`.
-  bool _esVersionMasNueva(String remota, String instalada) {
-    List<int> partes(String v) => v
-        .split('+')
-        .first // ignora el build number tipo "1.0.0+1"
-        .split('.')
-        .map((p) => int.tryParse(p) ?? 0)
-        .toList();
-
-    final partesRemota = partes(remota);
-    final partesInstalada = partes(instalada);
-
-    for (var i = 0; i < 3; i++) {
-      final r = i < partesRemota.length ? partesRemota[i] : 0;
-      final inst = i < partesInstalada.length ? partesInstalada[i] : 0;
-      if (r != inst) return r > inst;
-    }
-    return false;
+    final info = await revisarVersionNueva();
+    if (!mounted || info == null) return;
+    setState(() => _versionNueva = info);
   }
 
   @override
@@ -175,7 +107,7 @@ class SplashScreenState extends State<SplashScreen>
     );
   }
 
-  void _mostrarDialogoActualizacion(_InfoVersionNueva info) {
+  void _mostrarDialogoActualizacion(InfoVersionNueva info) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -213,7 +145,7 @@ class SplashScreenState extends State<SplashScreen>
   /// comprimido), lo DESCOMPRIME en memoria para extraer el .apk real, lo
   /// guarda en el teléfono, y abre el instalador del sistema. Todo esto es
   /// automático -- el usuario nunca ve ni maneja el .zip directamente.
-  Future<void> _descargarEInstalar(_InfoVersionNueva info) async {
+  Future<void> _descargarEInstalar(InfoVersionNueva info) async {
     try {
       final respuesta = await http.get(Uri.parse(info.downloadUrl));
       if (respuesta.statusCode != 200) {
@@ -261,15 +193,9 @@ class SplashScreenState extends State<SplashScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       body: DecoratedBox(
-        // DecoratedBox en vez de Container: evita un layer de composición
-        // extra innecesario ya que no necesitamos padding/margin aquí.
         decoration: const BoxDecoration(gradient: AppColors.warmGradient),
         child: Center(
           child: RepaintBoundary(
-            // Aísla la animación en su propia capa de repintado: así Flutter
-            // no tiene que re-rasterizar el gradiente de fondo completo en
-            // cada uno de los frames de la animación de escala/fade, solo
-            // este widget pequeño. Esto es lo que más ayuda contra el jank.
             child: FadeTransition(
               opacity: _fadeAnimation,
               child: ScaleTransition(
@@ -291,16 +217,11 @@ class SplashScreenState extends State<SplashScreen>
                           ),
                         ],
                       ),
-                      // Mientras la imagen se precachea, muestra un círculo
-                      // vacío del mismo tamaño en vez de nada (evita "salto"
-                      // de layout cuando aparece).
                       child: _imageReady
                           ? ClipOval(
                               child: Image.asset(
                                 'assets/image.png',
                                 fit: BoxFit.cover,
-                                // gaplessPlayback evita un parpadeo si el
-                                // widget se reconstruye antes de navegar.
                                 gaplessPlayback: true,
                               ),
                             )
@@ -335,20 +256,4 @@ class SplashScreenState extends State<SplashScreen>
       ),
     );
   }
-}
-
-class _InfoVersionNueva {
-  final String version;
-  final String downloadUrl;
-  final String apkFileName;
-  final String zipFileName;
-  final String notas;
-
-  _InfoVersionNueva({
-    required this.version,
-    required this.downloadUrl,
-    required this.apkFileName,
-    required this.zipFileName,
-    required this.notas,
-  });
 }

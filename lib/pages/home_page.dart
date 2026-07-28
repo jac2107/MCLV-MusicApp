@@ -9,6 +9,9 @@ import 'categoria_page.dart';
 import 'song_picker_page.dart';
 import 'favoritos_page.dart';
 import '../utils/background_painters.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import '../utils/version_checker.dart';
+import '../utils/web_download.dart' if (dart.library.io) '../utils/web_download_stub.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -203,6 +206,7 @@ class _HomePageContent extends StatelessWidget {
                       ),
                       const SizedBox(height: 28),
                       _SocialRow(isDark: isDark),
+                      _UpdateButton(accentColor: t.accent, isDark: isDark),
                     ],
                   ),
                 ),
@@ -429,6 +433,80 @@ class _SocialIcon extends StatelessWidget {
           ],
         ),
         child: Image.asset(asset, width: 26, height: 26),
+      ),
+    );
+  }
+}
+class _UpdateButton extends StatefulWidget {
+  final Color accentColor;
+  final bool isDark;
+  const _UpdateButton({required this.accentColor, required this.isDark});
+
+  @override
+  State<_UpdateButton> createState() => _UpdateButtonState();
+}
+
+class _UpdateButtonState extends State<_UpdateButton> {
+  InfoVersionNueva? _info;
+  bool _descargando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
+
+  Future<void> _cargar() async {
+    final info = await revisarVersionNueva();
+    if (mounted) setState(() => _info = info);
+  }
+
+  Future<void> _descargar() async {
+    if (_info == null || _descargando || !kIsWeb) return;
+    setState(() => _descargando = true);
+    try {
+      await descargarApkWeb(_info!.downloadUrl, _info!.apkFileName);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo descargar: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _descargando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // En Android, este botón solo se muestra si hay una actualización
+    // pendiente (y es informativo -- la descarga real ya la maneja el
+    // diálogo del splash). En web, no hay "info" que comparar porque
+    // revisarVersionNueva() en web siempre devuelve la última publicada.
+    if (_info == null) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 18),
+      child: ElevatedButton.icon(
+        onPressed: kIsWeb ? (_descargando ? null : _descargar) : null,
+        icon: _descargando
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.download_rounded),
+        label: Text(
+          kIsWeb
+              ? 'Descargar app para Android'
+              : 'Actualización disponible: v${_info!.version}',
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: widget.accentColor,
+          foregroundColor: widget.isDark ? AppColors.charcoal : Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
       ),
     );
   }

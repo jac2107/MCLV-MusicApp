@@ -362,8 +362,7 @@ $LinkDescargaGitHub = "https://github.com/$Repo/releases/download/$Tag/$NombreAp
 # Android que se queda colgado al 100% con descargas de .apk grandes
 # desde GitHub Releases (ver nota al inicio del script). Solo existe si
 # no se usó -SinWeb.
-$LinkDescargaHosting = "$DominioHosting/downloads/$NombreApk"
-
+$LinkDescargaHosting = "$DominioHosting/assets-extra/$NombreZip"
 # ---------------------------------------------------------------------
 # 8. Notificación push por FCM al topic de actualizaciones
 # ---------------------------------------------------------------------
