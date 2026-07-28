@@ -314,7 +314,7 @@ if (-not $SinWeb) {
         version     = $Version
         apkFileName = $NombreApk
         zipFileName = $NombreZip
-        $LinkDescargaHosting = "$DominioHosting/downloads/$NombreApk"
+        downloadUrl = "$DominioHosting/downloads/$NombreZip"
         notas       = $Notas
     } | ConvertTo-Json
     Set-Content -Path "build\web\version.json" -Value $VersionJson -Encoding utf8
