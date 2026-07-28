@@ -36,6 +36,7 @@ dependencies:
   printing: ^5.13.3     # vista previa e impartir el PDF generado
   package_info_plus: ^8.1.0
   archive: ^3.6.1
+  open_filex: ^4.5.0
   native_metronome:
       path: ./native_metronome
 

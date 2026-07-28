@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:archive/archive.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -171,10 +171,7 @@ class SplashScreenState extends State<SplashScreen>
       // Requiere que el usuario ya haya dado permiso de "instalar apps
       // desconocidas" para esta app la primera vez (Android lo pide
       // automáticamente si falta).
-      final uri = Uri.file(rutaApk);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri);
-      }
+      await OpenFilex.open(rutaApk);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
