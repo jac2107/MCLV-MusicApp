@@ -22,8 +22,6 @@ class InfoVersionNueva {
   });
 }
 
-/// Compara "1.2.0" vs "1.1.0" componente por componente. true si `remota`
-/// es estrictamente mayor que `instalada`.
 bool esVersionMasNueva(String remota, String instalada) {
   List<int> partes(String v) => v
       .split('+')
@@ -42,15 +40,14 @@ bool esVersionMasNueva(String remota, String instalada) {
   return false;
 }
 
-/// En Android: devuelve info SOLO si hay una versión más nueva que la
-/// instalada. En web: devuelve SIEMPRE la última publicada (no hay
-/// "versión instalada" con la que comparar -- la web siempre sirve la
-/// última build de por sí, pero el botón de descarga de APK debe
-/// aparecer siempre para quien todavía no tiene la app).
 Future<InfoVersionNueva?> revisarVersionNueva() async {
   try {
+    // El parámetro ?t=... rompe cualquier caché intermedio (CDN de
+    // Firebase Hosting, proxy del operador móvil, o caché del cliente
+    // http) forzando que cada request se trate como una URL distinta.
+    final url = '$kVersionCheckUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     final respuesta = await http
-        .get(Uri.parse(kVersionCheckUrl))
+        .get(Uri.parse(url))
         .timeout(const Duration(seconds: 5));
     if (respuesta.statusCode != 200) return null;
 
@@ -76,7 +73,6 @@ Future<InfoVersionNueva?> revisarVersionNueva() async {
     );
 
     if (kIsWeb) {
-      // Web: siempre se ofrece la descarga, no hay versión "instalada".
       return info;
     }
 
