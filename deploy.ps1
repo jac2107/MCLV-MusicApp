@@ -281,6 +281,10 @@ Copy-Item -Path $RutaApkOriginal -Destination $RutaApkFinal -Force
 # versión y el nombre del archivo .zip a descargar.
 # ---------------------------------------------------------------------
 if (-not $SinWeb) {
+        Write-Host "==> Limpiando build\web anterior..." -ForegroundColor Cyan
+    if (Test-Path "build\web") {
+        Remove-Item -Path "build\web" -Recurse -Force
+    }
     Write-Host "==> Compilando web (flutter build web)..." -ForegroundColor Cyan
     flutter build web
     if ($LASTEXITCODE -ne 0) {
