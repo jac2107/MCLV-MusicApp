@@ -52,23 +52,28 @@
 #     más abajo). Este archivo es una credencial administrativa completa
 #     sobre tu proyecto Firebase -- NUNCA debe subirse a Git.
 
+# Fuerza la consola a UTF-8 para que las tildes y símbolos especiales en
+# -Notas no se corrompan al mostrarse en consola o mandarse por la
+# notificación push (evita el problema de "Actual zate" en vez de
+# "¡Actualízate").
 param(
     [Parameter(Mandatory = $true)]
     [string]$Version,
 
     [string]$Notas = "Nueva versión de MCLV MusicApp.",
 
-    # Mensaje de commit a usar SI hay cambios pendientes por subir. Si no
-    # se especifica, se usa uno genérico basado en la versión.
     [string]$MensajeCommit = "",
 
-    # Si se pasa este switch, se saltan el build/deploy de Hosting web.
-    # Útil si solo quieres publicar el APK sin tocar la página.
     [switch]$SinWeb,
 
-    # Si se pasa este switch, no se manda la notificación push al final.
     [switch]$SinNotificacion
 )
+
+# Fuerza la consola a UTF-8 para que las tildes y símbolos especiales en
+# -Notas no se corrompan al mostrarse en consola o mandarse por la
+# notificación push.
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 # =======================================================================
 # CONFIGURACIÓN -- ajusta estas rutas/valores una sola vez si cambian
