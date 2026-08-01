@@ -392,65 +392,66 @@ class SongPdfGenerator {
 
   final secciones = _agruparEnSecciones(lineas);
 
-  final widgets = <pw.Widget>[];
-  List<List<String>> izquierda = [];
-  List<List<String>> derecha = [];
-  int lineasIzq = 0;
-  int lineasDer = 0;
-
-  void cerrarBloque() {
-    if (izquierda.isEmpty && derecha.isEmpty) return;
-
-    pw.Widget buildCol(List<List<String>> secs) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: secs
-              .expand((s) => s)
-              .map((l) => _buildLineaWidget(l, monoFont))
-              .toList(),
-        );
-
-    widgets.add(pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Expanded(child: buildCol(izquierda)),
-        pw.SizedBox(width: 18),
-        pw.Expanded(child: buildCol(derecha)),
-      ],
-    ));
-
-    izquierda = [];
-    derecha = [];
-    lineasIzq = 0;
-    lineasDer = 0;
-  }
+  // Construir columna izquierda respetando cortes por sección
+  final List<String> colIzq = [];
+  final List<String> colDer = [];
 
   for (final seccion in secciones) {
-    // Si la sección es gigante (excede una columna), la partimos línea a línea
-    if (seccion.length > lineasPorColumna) {
-      cerrarBloque(); // cierra lo que haya acumulado antes
-      // Entregar línea por línea directamente a MultiPage (no en Row de 2 col)
-      for (final linea in seccion) {
-        widgets.add(_buildLineaWidget(linea, monoFont));
-      }
-      continue;
+    // Si la sección entera cabe en la izquierda, va ahí
+    if (colIzq.length + seccion.length <= lineasPorColumna) {
+      colIzq.addAll(seccion);
     }
-
-    // Sección normal: intentar meterla en izquierda, luego derecha
-    if (lineasIzq + seccion.length <= lineasPorColumna) {
-      izquierda.add(seccion);
-      lineasIzq += seccion.length;
-    } else if (lineasDer + seccion.length <= lineasPorColumna) {
-      derecha.add(seccion);
-      lineasDer += seccion.length;
-    } else {
-      // Ambas columnas llenas — cerrar bloque y empezar nuevo
-      cerrarBloque();
-      izquierda.add(seccion);
-      lineasIzq += seccion.length;
+    // Si no cabe en izquierda pero sí en derecha, va a derecha
+    else if (colDer.length + seccion.length <= lineasPorColumna) {
+      colDer.addAll(seccion);
+    }
+    // Si no cabe en ninguna (sección gigante o ambas llenas):
+    // partir línea a línea llenando primero izquierda, luego derecha
+    else {
+      for (final linea in seccion) {
+        if (colIzq.length < lineasPorColumna) {
+          colIzq.add(linea);
+        } else {
+          colDer.add(linea);
+        }
+      }
     }
   }
 
-  cerrarBloque();
+  // Ahora entregar fila por fila a MultiPage — nunca un Row gigante
+  final widgets = <pw.Widget>[];
+  final totalFilas = colIzq.length;
+
+  for (int i = 0; i < totalFilas; i++) {
+    final lineaIzq = colIzq[i];
+    final lineaDer = i < colDer.length ? colDer[i] : '';
+
+    widgets.add(
+      pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Expanded(child: _buildLineaWidget(lineaIzq, monoFont)),
+          pw.SizedBox(width: 18),
+          pw.Expanded(child: _buildLineaWidget(lineaDer, monoFont)),
+        ],
+      ),
+    );
+  }
+
+  // Si derecha tiene más líneas que izquierda (raro pero posible)
+  for (int i = totalFilas; i < colDer.length; i++) {
+    widgets.add(
+      pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Expanded(child: _buildLineaWidget('', monoFont)),
+          pw.SizedBox(width: 18),
+          pw.Expanded(child: _buildLineaWidget(colDer[i], monoFont)),
+        ],
+      ),
+    );
+  }
+
   return widgets;
 }
 
