@@ -312,14 +312,20 @@ class SongPdfGenerator {
   // =======================================================================
 
   /// Una lista plana de widgets, uno por línea. MultiPage los pagina solo.
-  static List<pw.Widget> _buildLyricsUnaColumna(
-    List<String> lineas,
-    pw.Font monoFont,
-  ) {
-    return lineas
-        .map((linea) => _buildLineaWidget(linea, monoFont))
-        .toList(growable: false);
-  }
+static List<pw.Widget> _buildLyricsUnaColumna(
+  List<String> lineas,
+  pw.Font monoFont,
+) {
+  final secciones = _agruparEnSecciones(lineas);
+  return secciones.map((seccion) =>
+    pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: seccion
+          .map((linea) => _buildLineaWidget(linea, monoFont))
+          .toList(growable: false),
+    ),
+  ).toList(growable: false);
+}
 
   // =======================================================================
   // RENDERIZADO DE LETRA — 2 COLUMNAS
