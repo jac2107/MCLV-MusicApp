@@ -382,93 +382,36 @@ class SongPdfGenerator {
   /// "líneas fijas por bloque": cortar una sección a mitad de camino, y
   /// dejar espacio en blanco de sobra cuando en realidad cabía más letra.
   static List<pw.Widget> _buildLyricsEnDosColumnas(
-    List<String> lineas,
-    pw.Font monoFont,
-  ) {
-    final double altoUtil =
-        PdfPageFormat.a4.height - _pageMargin.vertical - _altoEncabezadoAprox;
-    final int lineasPorColumna = (altoUtil / _alturaLineaAprox).floor().clamp(10, 300);
+  List<String> lineas,
+  pw.Font monoFont,
+) {
+  // Dividir la lista en mitades para las dos columnas
+  final mitad = (lineas.length / 2).ceil();
+  final izquierda = lineas.sublist(0, mitad);
+  final derecha = lineas.sublist(mitad);
 
-    final secciones = _agruparEnSecciones(lineas);
+  // Construir lista de filas: cada fila tiene una línea de cada columna
+  final widgets = <pw.Widget>[];
+  final totalFilas = izquierda.length; // izquierda siempre >= derecha
 
-    final widgets = <pw.Widget>[];
+  for (int i = 0; i < totalFilas; i++) {
+    final lineaIzq = izquierda[i];
+    final lineaDer = i < derecha.length ? derecha[i] : '';
 
-    List<String> columnaIzquierda = [];
-    List<String> columnaDerecha = [];
-    int lineasIzquierda = 0;
-    int lineasDerecha = 0;
-
-    void cerrarBloqueActual() {
-      if (columnaIzquierda.isEmpty && columnaDerecha.isEmpty) return;
-
-      pw.Widget buildColumna(List<String> lineasColumna) {
-        return pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: lineasColumna
-              .map((linea) => _buildLineaWidget(linea, monoFont))
-              .toList(growable: false),
-        );
-      }
-
-      widgets.add(
-        pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Expanded(child: buildColumna(columnaIzquierda)),
-            pw.SizedBox(width: 18),
-            pw.Expanded(child: buildColumna(columnaDerecha)),
-          ],
-        ),
-      );
-
-      columnaIzquierda = [];
-      columnaDerecha = [];
-      lineasIzquierda = 0;
-      lineasDerecha = 0;
-    }
-
-    for (final seccion in secciones) {
-      final cabeEnIzquierda = lineasIzquierda + seccion.length <= lineasPorColumna;
-      final cabeEnDerecha = lineasDerecha + seccion.length <= lineasPorColumna;
-
-      if (cabeEnIzquierda) {
-        // Prioridad 1: si cabe en la izquierda, va ahí (llena de arriba
-        // hacia abajo antes de empezar la derecha).
-        columnaIzquierda.addAll(seccion);
-        lineasIzquierda += seccion.length;
-      } else if (cabeEnDerecha) {
-        // Prioridad 2: no cupo en la izquierda pero sí en la derecha.
-        columnaDerecha.addAll(seccion);
-        lineasDerecha += seccion.length;
-      } else if (columnaIzquierda.isEmpty && columnaDerecha.isEmpty) {
-        // Sección gigante en un bloque totalmente vacío: no hay forma de
-        // que quepa en ninguna columna sin partirla. Se deja pasar
-        // completa en la izquierda en vez de cortar una palabra clave a
-        // mitad de camino.
-        columnaIzquierda.addAll(seccion);
-        lineasIzquierda += seccion.length;
-      } else if (columnaDerecha.isEmpty) {
-        // La izquierda ya tiene contenido y no cupo ahí, pero la derecha
-        // de este bloque está vacía: mejor usarla (aunque la sección se
-        // pase del alto ideal) que cerrar el bloque dejando la derecha sin
-        // usar del todo.
-        columnaDerecha.addAll(seccion);
-        lineasDerecha += seccion.length;
-      } else {
-        // Ni la izquierda ni la derecha de este bloque tienen espacio
-        // para esta sección: cerramos el bloque actual (usando solo el
-        // espacio que ya se llenó, sin dejar hueco de sobra) y empezamos
-        // un bloque nuevo con esta sección.
-        cerrarBloqueActual();
-        columnaIzquierda.addAll(seccion);
-        lineasIzquierda += seccion.length;
-      }
-    }
-
-    cerrarBloqueActual();
-
-    return widgets;
+    widgets.add(
+      pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Expanded(child: _buildLineaWidget(lineaIzq, monoFont)),
+          pw.SizedBox(width: 18),
+          pw.Expanded(child: _buildLineaWidget(lineaDer, monoFont)),
+        ],
+      ),
+    );
   }
+
+  return widgets;
+}
 
   /// Agrupa las líneas de una canción en secciones indivisibles: cada
   /// sección empieza en una línea que contiene una palabra clave
