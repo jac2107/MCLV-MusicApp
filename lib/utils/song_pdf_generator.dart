@@ -385,31 +385,72 @@ class SongPdfGenerator {
   List<String> lineas,
   pw.Font monoFont,
 ) {
-  // Dividir la lista en mitades para las dos columnas
-  final mitad = (lineas.length / 2).ceil();
-  final izquierda = lineas.sublist(0, mitad);
-  final derecha = lineas.sublist(mitad);
+  final double altoUtil =
+      PdfPageFormat.a4.height - _pageMargin.vertical - _altoEncabezadoAprox;
+  final int lineasPorColumna =
+      (altoUtil / _alturaLineaAprox).floor().clamp(10, 300);
 
-  // Construir lista de filas: cada fila tiene una línea de cada columna
+  final secciones = _agruparEnSecciones(lineas);
+
   final widgets = <pw.Widget>[];
-  final totalFilas = izquierda.length; // izquierda siempre >= derecha
+  List<List<String>> izquierda = [];
+  List<List<String>> derecha = [];
+  int lineasIzq = 0;
+  int lineasDer = 0;
 
-  for (int i = 0; i < totalFilas; i++) {
-    final lineaIzq = izquierda[i];
-    final lineaDer = i < derecha.length ? derecha[i] : '';
+  void cerrarBloque() {
+    if (izquierda.isEmpty && derecha.isEmpty) return;
 
-    widgets.add(
-      pw.Row(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Expanded(child: _buildLineaWidget(lineaIzq, monoFont)),
-          pw.SizedBox(width: 18),
-          pw.Expanded(child: _buildLineaWidget(lineaDer, monoFont)),
-        ],
-      ),
-    );
+    pw.Widget buildCol(List<List<String>> secs) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: secs
+              .expand((s) => s)
+              .map((l) => _buildLineaWidget(l, monoFont))
+              .toList(),
+        );
+
+    widgets.add(pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Expanded(child: buildCol(izquierda)),
+        pw.SizedBox(width: 18),
+        pw.Expanded(child: buildCol(derecha)),
+      ],
+    ));
+
+    izquierda = [];
+    derecha = [];
+    lineasIzq = 0;
+    lineasDer = 0;
   }
 
+  for (final seccion in secciones) {
+    // Si la sección es gigante (excede una columna), la partimos línea a línea
+    if (seccion.length > lineasPorColumna) {
+      cerrarBloque(); // cierra lo que haya acumulado antes
+      // Entregar línea por línea directamente a MultiPage (no en Row de 2 col)
+      for (final linea in seccion) {
+        widgets.add(_buildLineaWidget(linea, monoFont));
+      }
+      continue;
+    }
+
+    // Sección normal: intentar meterla en izquierda, luego derecha
+    if (lineasIzq + seccion.length <= lineasPorColumna) {
+      izquierda.add(seccion);
+      lineasIzq += seccion.length;
+    } else if (lineasDer + seccion.length <= lineasPorColumna) {
+      derecha.add(seccion);
+      lineasDer += seccion.length;
+    } else {
+      // Ambas columnas llenas — cerrar bloque y empezar nuevo
+      cerrarBloque();
+      izquierda.add(seccion);
+      lineasIzq += seccion.length;
+    }
+  }
+
+  cerrarBloque();
   return widgets;
 }
 
