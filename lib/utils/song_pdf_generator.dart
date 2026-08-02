@@ -290,22 +290,31 @@ class SongPdfGenerator {
   /// espacios para posicionarse sobre la letra — reducir el ancho a la
   /// mitad rompería ese alineado, así que la canción va a 1 columna.
   static bool _tieneAcordesAlineados(List<String> lineas) {
-    int contador = 0;
-    for (final linea in lineas) {
-      final trimmed = linea.trim();
-      if (trimmed.isEmpty) continue;
-      if (_keywordRegex.hasMatch(trimmed)) continue;
-      final tokens = trimmed.split(RegExp(r'\s+'));
-      final todosAcordes = tokens.every(
-        (t) => t.isEmpty || _chordRegex.hasMatch(t) || t == '-',
-      );
-      if (todosAcordes && tokens.isNotEmpty) {
+  int contador = 0;
+  for (final linea in lineas) {
+    // Si la línea empieza con espacio, es una línea de acordes indentada
+    final estaIndentada = linea.startsWith(' ') || linea.startsWith('\t');
+    final trimmed = linea.trim();
+    if (trimmed.isEmpty) continue;
+    if (_keywordRegex.hasMatch(trimmed)) continue;
+
+    final tokens = trimmed.split(RegExp(r'\s+'));
+    final todosAcordes = tokens.every(
+      (t) => t.isEmpty || _chordRegex.hasMatch(t) || t == '-',
+    );
+
+    // Solo cuenta como línea de acordes si:
+    // - está indentada Y todos los tokens son acordes, O
+    // - tiene 2+ tokens y todos son acordes (ej: "F#m D A E")
+    if (todosAcordes && tokens.isNotEmpty) {
+      if (estaIndentada || tokens.length >= 2) {
         contador++;
         if (contador >= 3) return true;
       }
     }
-    return false;
   }
+  return false;
+}
 
   // =======================================================================
   // RENDERIZADO DE LETRA — 1 COLUMNA
@@ -316,15 +325,21 @@ static List<pw.Widget> _buildLyricsUnaColumna(
   List<String> lineas,
   pw.Font monoFont,
 ) {
-  final secciones = _agruparEnSecciones(lineas);
-  return secciones.map((seccion) =>
-    pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: seccion
-          .map((linea) => _buildLineaWidget(linea, monoFont))
-          .toList(growable: false),
-    ),
-  ).toList(growable: false);
+  // Entregar líneas sueltas pero con padding-top en cada keyword
+  // para que MultiPage no parta justo después del título de sección.
+  // Es el mejor compromiso posible sin SpanningWidget nativo.
+  final widgets = <pw.Widget>[];
+  for (int i = 0; i < lineas.length; i++) {
+    final linea = lineas[i];
+    final esKeyword = _keywordRegex.hasMatch(linea.trim());
+    if (esKeyword && i > 0) {
+      // Espacio antes de cada sección para "empujar" el salto de página
+      // antes del título, no después
+      widgets.add(pw.SizedBox(height: _lyricsFontSize * 2));
+    }
+    widgets.add(_buildLineaWidget(linea, monoFont));
+  }
+  return widgets;
 }
 
   // =======================================================================
