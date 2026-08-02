@@ -346,62 +346,54 @@ static List<pw.Widget> _buildLyricsUnaColumna(
   /// 3. Empareja colIzq[i] con colDer[i] en Rows individuales → MultiPage
   ///    puede paginar entre cualquier par de filas sin problema.
   static List<pw.Widget> _buildLyricsEnDosColumnas(
-    List<String> lineas,
-    pw.Font monoFont,
-  ) {
-    final double altoUtil =
-        PdfPageFormat.a4.height - _pageMargin.vertical - _altoEncabezadoAprox;
-    final int lineasPorColumna =
-        (altoUtil / _alturaLineaAprox).floor().clamp(10, 300);
+  List<String> lineas,
+  pw.Font monoFont,
+) {
+  final secciones = _agruparEnSecciones(lineas);
+  
+  final List<String> colIzq = [];
+  final List<String> colDer = [];
+  final double altoUtil =
+      PdfPageFormat.a4.height - _pageMargin.vertical - _altoEncabezadoAprox;
+  final int lineasPorColumna =
+      (altoUtil / _alturaLineaAprox).floor().clamp(10, 300);
 
-    final secciones = _agruparEnSecciones(lineas);
-
-    final List<String> colIzq = [];
-    final List<String> colDer = [];
-
-    for (final seccion in secciones) {
-      if (colIzq.length + seccion.length <= lineasPorColumna) {
-        // Cabe en la izquierda
-        colIzq.addAll(seccion);
-      } else if (colDer.length + seccion.length <= lineasPorColumna) {
-        // No cabe en izquierda pero sí en derecha
-        colDer.addAll(seccion);
-      } else {
-        // Sección gigante o ambas llenas: partir línea a línea como fallback
-        for (final linea in seccion) {
-          if (colIzq.length < lineasPorColumna) {
-            colIzq.add(linea);
-          } else {
-            colDer.add(linea);
-          }
+  for (final seccion in secciones) {
+    if (colIzq.length + seccion.length <= lineasPorColumna) {
+      colIzq.addAll(seccion);
+    } else if (colDer.length + seccion.length <= lineasPorColumna) {
+      colDer.addAll(seccion);
+    } else {
+      for (final linea in seccion) {
+        if (colIzq.length < lineasPorColumna) {
+          colIzq.add(linea);
+        } else {
+          colDer.add(linea);
         }
       }
     }
-
-    // Emparejar fila a fila → Rows pequeños que MultiPage puede paginar
-    final widgets = <pw.Widget>[];
-    final totalFilas = colIzq.length > colDer.length
-        ? colIzq.length
-        : colDer.length;
-
-    for (int i = 0; i < totalFilas; i++) {
-      final lineaIzq = i < colIzq.length ? colIzq[i] : '';
-      final lineaDer = i < colDer.length ? colDer[i] : '';
-
-      widgets.add(
-        pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Expanded(child: _buildLineaWidget(lineaIzq, monoFont)),
-            pw.SizedBox(width: 18),
-            pw.Expanded(child: _buildLineaWidget(lineaDer, monoFont)),
-          ],
-        ),
-      );
-    }
-
-    return widgets;
   }
+
+  // Entregar sección por sección como Column — MultiPage respeta el bloque
+  final widgets = <pw.Widget>[];
+  final totalFilas = colIzq.length > colDer.length
+      ? colIzq.length : colDer.length;
+
+  for (int i = 0; i < totalFilas; i++) {
+    final lineaIzq = i < colIzq.length ? colIzq[i] : '';
+    final lineaDer = i < colDer.length ? colDer[i] : '';
+    widgets.add(pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Expanded(child: _buildLineaWidget(lineaIzq, monoFont)),
+        pw.SizedBox(width: 18),
+        pw.Expanded(child: _buildLineaWidget(lineaDer, monoFont)),
+      ],
+    ));
+  }
+
+  return widgets;
+}
 
   // =======================================================================
   // AGRUPACIÓN EN SECCIONES
