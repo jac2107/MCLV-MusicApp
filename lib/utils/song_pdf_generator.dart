@@ -279,33 +279,6 @@ class SongPdfGenerator {
     );
   }
 
-  // =======================================================================
-  // DETECCIÓN DE ACORDES ALINEADOS
-  // =======================================================================
-
-  /// Devuelve true si la canción tiene 3 o más líneas de "solo acordes"
-  /// (tokens no-espacio que son todos acordes válidos). Esas líneas usan
-  /// espacios para posicionarse sobre la letra — reducir el ancho a la
-  /// mitad rompería ese alineado, así que la canción va a 1 columna.
-static bool _tieneAcordesAlineados(List<String> lineas) {
-  int contador = 0;
-  for (final linea in lineas) {
-    // Debe empezar con al menos 1 espacio (indentación manual de acordes)
-    if (!linea.startsWith(' ') && !linea.startsWith('\t')) continue;
-    final trimmed = linea.trim();
-    if (trimmed.isEmpty) continue;
-    if (_keywordRegex.hasMatch(trimmed)) continue;
-    final tokens = trimmed.split(RegExp(r'\s+'));
-    final todosAcordes = tokens.every(
-      (t) => t.isEmpty || _chordRegex.hasMatch(t) || t == '-',
-    );
-    if (todosAcordes && tokens.isNotEmpty) {
-      contador++;
-      if (contador >= 2) return true; // 2 es suficiente evidencia
-    }
-  }
-  return false;
-}
 
   // =======================================================================
   // RENDERIZADO DE LETRA — 1 COLUMNA
@@ -366,86 +339,38 @@ static List<pw.Widget> _buildLyricsEnDosColumnas(
   final int lineasPorColumna =
       (altoUtil / _alturaLineaAprox).floor().clamp(10, 300);
 
-  final widgets = <pw.Widget>[];
-  List<List<String>> colIzq = [];
-  List<List<String>> colDer = [];
-  int lineasIzq = 0;
-  int lineasDer = 0;
-
-  void flushPagina() {
-    if (colIzq.isEmpty && colDer.isEmpty) return;
-    widgets.add(_buildRowDosColumnas(colIzq, colDer, monoFont));
-    colIzq = [];
-    colDer = [];
-    lineasIzq = 0;
-    lineasDer = 0;
-  }
+  // Distribuir secciones en columna izq y der
+  final List<String> colIzq = [];
+  final List<String> colDer = [];
 
   for (final seccion in secciones) {
-    final n = seccion.length;
-
-    if (lineasIzq + n <= lineasPorColumna) {
-      // Cabe en columna izquierda
-      colIzq.add(seccion);
-      lineasIzq += n;
-    } else if (lineasDer + n <= lineasPorColumna) {
-      // Cabe en columna derecha
-      colDer.add(seccion);
-      lineasDer += n;
-    } else if (lineasDer > 0) {
-      // Columna derecha ya tiene algo → flush completo y empezar de nuevo
-      flushPagina();
-      colIzq.add(seccion);
-      lineasIzq += n;
-    } else if (lineasIzq > 0) {
-      // Columna izquierda tiene algo, derecha vacía → mover a derecha aunque no quepa perfecto
-      // (es una sección grande, la ponemos en derecha y hacemos flush)
-      colDer.add(seccion);
-      lineasDer += n;
-      flushPagina();
+    if (colIzq.length + seccion.length <= lineasPorColumna) {
+      colIzq.addAll(seccion);
     } else {
-      // Bloque completamente vacío y la sección sola no cabe → agregarla igual y flush
-      colIzq.add(seccion);
-      lineasIzq += n;
-      flushPagina();
+      colDer.addAll(seccion);
     }
   }
-  flushPagina(); // vaciar lo que quedó
 
+  // Igualar longitud con líneas vacías
+  while (colIzq.length < colDer.length) colIzq.add('');
+  while (colDer.length < colIzq.length) colDer.add('');
+
+  // Devolver un Row por cada fila — MultiPage puede paginar entre filas
+  final widgets = <pw.Widget>[];
+  for (int i = 0; i < colIzq.length; i++) {
+    widgets.add(pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Expanded(child: _buildLineaWidget(colIzq[i], monoFont)),
+        pw.SizedBox(width: 18),
+        pw.Expanded(child: _buildLineaWidget(colDer[i], monoFont)),
+      ],
+    ));
+  }
   return widgets;
 }
 
-static pw.Widget _buildRowDosColumnas(
-  List<List<String>> seccionesIzq,
-  List<List<String>> seccionesDer,
-  pw.Font monoFont,
-) {
-  pw.Widget buildColumna(List<List<String>> secs) {
-    final widgets = <pw.Widget>[];
-    for (int i = 0; i < secs.length; i++) {
-      if (i > 0) widgets.add(pw.SizedBox(height: 8));
-      widgets.add(pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: secs[i]
-            .map((l) => _buildLineaWidget(l, monoFont))
-            .toList(growable: false),
-      ));
-    }
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: widgets,
-    );
-  }
 
-  return pw.Row(
-    crossAxisAlignment: pw.CrossAxisAlignment.start,
-    children: [
-      pw.Expanded(child: buildColumna(seccionesIzq)),
-      pw.SizedBox(width: 18),
-      pw.Expanded(child: buildColumna(seccionesDer)),
-    ],
-  );
-}
 
   // =======================================================================
   // AGRUPACIÓN EN SECCIONES
