@@ -355,7 +355,7 @@ static List<pw.Widget> _buildLyricsUnaColumna(
   ///    parte línea a línea como fallback.
   /// 3. Empareja colIzq[i] con colDer[i] en Rows individuales → MultiPage
   ///    puede paginar entre cualquier par de filas sin problema.
- static List<pw.Widget> _buildLyricsEnDosColumnas(
+static List<pw.Widget> _buildLyricsEnDosColumnas(
   List<String> lineas,
   pw.Font monoFont,
 ) {
@@ -363,11 +363,9 @@ static List<pw.Widget> _buildLyricsUnaColumna(
 
   final double altoUtil =
       PdfPageFormat.a4.height - _pageMargin.vertical - _altoEncabezadoAprox;
-  final int lineasPorPagina =
+  final int lineasPorColumna =
       (altoUtil / _alturaLineaAprox).floor().clamp(10, 300);
-  final int lineasPorColumna = lineasPorPagina ~/ 2;
 
-  // Agrupar secciones en "páginas" de dos columnas
   final widgets = <pw.Widget>[];
   List<List<String>> colIzq = [];
   List<List<String>> colDer = [];
@@ -385,20 +383,34 @@ static List<pw.Widget> _buildLyricsUnaColumna(
 
   for (final seccion in secciones) {
     final n = seccion.length;
+
     if (lineasIzq + n <= lineasPorColumna) {
+      // Cabe en columna izquierda
       colIzq.add(seccion);
       lineasIzq += n;
     } else if (lineasDer + n <= lineasPorColumna) {
+      // Cabe en columna derecha
       colDer.add(seccion);
       lineasDer += n;
-    } else {
-      // Ni izq ni der tienen espacio → flush y empezar nueva "página"
+    } else if (lineasDer > 0) {
+      // Columna derecha ya tiene algo → flush completo y empezar de nuevo
       flushPagina();
       colIzq.add(seccion);
       lineasIzq += n;
+    } else if (lineasIzq > 0) {
+      // Columna izquierda tiene algo, derecha vacía → mover a derecha aunque no quepa perfecto
+      // (es una sección grande, la ponemos en derecha y hacemos flush)
+      colDer.add(seccion);
+      lineasDer += n;
+      flushPagina();
+    } else {
+      // Bloque completamente vacío y la sección sola no cabe → agregarla igual y flush
+      colIzq.add(seccion);
+      lineasIzq += n;
+      flushPagina();
     }
   }
-  flushPagina();
+  flushPagina(); // vaciar lo que quedó
 
   return widgets;
 }
@@ -520,7 +532,7 @@ static pw.Widget _buildRowDosColumnas(
 
   return pw.RichText(
     text: pw.TextSpan(children: spans),
-    softWrap: false, // igual que en la app — no rompe líneas largas
+    softWrap: true, // igual que en la app — no rompe líneas largas
   );
 }
 }

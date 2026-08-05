@@ -2,7 +2,7 @@ name: musicapp
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 2.3.11+20
+version: 2.3.12+21
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
