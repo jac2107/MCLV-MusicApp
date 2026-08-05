@@ -292,7 +292,8 @@ class SongPdfGenerator {
 static bool _tieneAcordesAlineados(List<String> lineas) {
   int contador = 0;
   for (final linea in lineas) {
-    final estaIndentada = linea.startsWith(' ') || linea.startsWith('\t');
+    // Debe empezar con al menos 1 espacio (indentación manual de acordes)
+    if (!linea.startsWith(' ') && !linea.startsWith('\t')) continue;
     final trimmed = linea.trim();
     if (trimmed.isEmpty) continue;
     if (_keywordRegex.hasMatch(trimmed)) continue;
@@ -301,10 +302,8 @@ static bool _tieneAcordesAlineados(List<String> lineas) {
       (t) => t.isEmpty || _chordRegex.hasMatch(t) || t == '-',
     );
     if (todosAcordes && tokens.isNotEmpty) {
-      if (estaIndentada || tokens.length >= 2) {
-        contador++;
-        if (contador >= 3) return true;
-      }
+      contador++;
+      if (contador >= 2) return true; // 2 es suficiente evidencia
     }
   }
   return false;
@@ -320,14 +319,24 @@ static List<pw.Widget> _buildLyricsUnaColumna(
   pw.Font monoFont,
 ) {
   final secciones = _agruparEnSecciones(lineas);
-  return secciones.map((seccion) =>
-    pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: seccion
-          .map((linea) => _buildLineaWidget(linea, monoFont))
-          .toList(growable: false),
-    ),
-  ).toList(growable: false);
+  final widgets = <pw.Widget>[];
+
+  for (int i = 0; i < secciones.length; i++) {
+    final seccion = secciones[i];
+    // Espacio antes de cada sección (excepto la primera)
+    if (i > 0) widgets.add(pw.SizedBox(height: 8));
+
+    // Toda la sección como un Column → MultiPage intenta no partirla
+    widgets.add(
+      pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: seccion
+            .map((linea) => _buildLineaWidget(linea, monoFont))
+            .toList(growable: false),
+      ),
+    );
+  }
+  return widgets;
 }
 
   // =======================================================================
@@ -353,49 +362,55 @@ static List<pw.Widget> _buildLyricsUnaColumna(
   pw.Font monoFont,
 ) {
   final secciones = _agruparEnSecciones(lineas);
-  
-  final List<String> colIzq = [];
-  final List<String> colDer = [];
+
   final double altoUtil =
       PdfPageFormat.a4.height - _pageMargin.vertical - _altoEncabezadoAprox;
   final int lineasPorColumna =
       (altoUtil / _alturaLineaAprox).floor().clamp(10, 300);
 
+  // Distribuir secciones completas entre columnas
+  final List<List<String>> seccionesIzq = [];
+  final List<List<String>> seccionesDer = [];
+  int lineasIzq = 0;
+
   for (final seccion in secciones) {
-    if (colIzq.length + seccion.length <= lineasPorColumna) {
-      colIzq.addAll(seccion);
-    } else if (colDer.length + seccion.length <= lineasPorColumna) {
-      colDer.addAll(seccion);
+    if (lineasIzq + seccion.length <= lineasPorColumna) {
+      seccionesIzq.add(seccion);
+      lineasIzq += seccion.length;
     } else {
-      for (final linea in seccion) {
-        if (colIzq.length < lineasPorColumna) {
-          colIzq.add(linea);
-        } else {
-          colDer.add(linea);
-        }
-      }
+      seccionesDer.add(seccion);
     }
   }
 
-  // Entregar sección por sección como Column — MultiPage respeta el bloque
-  final widgets = <pw.Widget>[];
-  final totalFilas = colIzq.length > colDer.length
-      ? colIzq.length : colDer.length;
-
-  for (int i = 0; i < totalFilas; i++) {
-    final lineaIzq = i < colIzq.length ? colIzq[i] : '';
-    final lineaDer = i < colDer.length ? colDer[i] : '';
-    widgets.add(pw.Row(
+  // Construir cada columna como lista de widgets con espaciado entre secciones
+  pw.Widget buildColumna(List<List<String>> secs) {
+    final widgets = <pw.Widget>[];
+    for (int i = 0; i < secs.length; i++) {
+      if (i > 0) widgets.add(pw.SizedBox(height: 8));
+      widgets.add(pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: secs[i]
+            .map((l) => _buildLineaWidget(l, monoFont))
+            .toList(growable: false),
+      ));
+    }
+    return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Expanded(child: _buildLineaWidget(lineaIzq, monoFont)),
-        pw.SizedBox(width: 18),
-        pw.Expanded(child: _buildLineaWidget(lineaDer, monoFont)),
-      ],
-    ));
+      children: widgets,
+    );
   }
 
-  return widgets;
+  // Un solo Row con las dos columnas — MultiPage las pagina como bloque
+  return [
+    pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Expanded(child: buildColumna(seccionesIzq)),
+        pw.SizedBox(width: 18),
+        pw.Expanded(child: buildColumna(seccionesDer)),
+      ],
+    ),
+  ];
 }
 
   // =======================================================================
@@ -430,49 +445,60 @@ static List<pw.Widget> _buildLyricsUnaColumna(
   /// usando siempre la misma fuente monoespaciada y el mismo tamaño para
   /// mantener el alineado calibrado manualmente.
   static pw.Widget _buildLineaWidget(String linea, pw.Font monoFont) {
-    if (linea.isEmpty) {
-      return pw.SizedBox(height: _lyricsFontSize * 1.15);
+  if (linea.trim().isEmpty) {
+    // Línea vacía del texto original → espacio visual entre párrafos
+    return pw.SizedBox(height: 6);
+  }
+
+  final spans = <pw.TextSpan>[];
+
+  final matches = <RegExpMatch>[
+    ..._keywordRegex.allMatches(linea),
+    ..._chordRegex.allMatches(linea),
+  ]..sort((a, b) => a.start.compareTo(b.start));
+
+  // Filtrar overlaps (keyword y chord pueden matchear lo mismo)
+  final filtrados = <RegExpMatch>[];
+  int lastEnd = 0;
+  for (final m in matches) {
+    if (m.start >= lastEnd) {
+      filtrados.add(m);
+      lastEnd = m.end;
     }
+  }
 
-    final spans = <pw.TextSpan>[];
-
-    final matches = <RegExpMatch>[
-      ..._keywordRegex.allMatches(linea),
-      ..._chordRegex.allMatches(linea),
-    ]..sort((a, b) => a.start.compareTo(b.start));
-
-    int current = 0;
-
-    for (final match in matches) {
-      if (match.start > current) {
-        spans.add(pw.TextSpan(
-          text: linea.substring(current, match.start),
-          style: pw.TextStyle(font: monoFont, fontSize: _lyricsFontSize),
-        ));
-      }
-
-      final token = match.group(0)!;
-      final esAcorde = _chordRegex.hasMatch(token);
-
+  int current = 0;
+  for (final match in filtrados) {
+    if (match.start > current) {
       spans.add(pw.TextSpan(
-        text: token,
-        style: pw.TextStyle(
-          font: monoFont,
-          fontSize: _lyricsFontSize,
-          color: esAcorde ? _chordColor : _keywordColor,
-        ),
-      ));
-
-      current = match.end;
-    }
-
-    if (current < linea.length) {
-      spans.add(pw.TextSpan(
-        text: linea.substring(current),
+        text: linea.substring(current, match.start),
         style: pw.TextStyle(font: monoFont, fontSize: _lyricsFontSize),
       ));
     }
-
-    return pw.RichText(text: pw.TextSpan(children: spans));
+    final token = match.group(0)!;
+    final esKeyword = _keywordRegex.hasMatch(token);
+    spans.add(pw.TextSpan(
+      text: token,
+      style: pw.TextStyle(
+        font: monoFont,
+        fontSize: _lyricsFontSize,
+        color: esKeyword ? _keywordColor : _chordColor,
+        fontWeight: esKeyword ? pw.FontWeight.bold : pw.FontWeight.normal,
+      ),
+    ));
+    current = match.end;
   }
+
+  if (current < linea.length) {
+    spans.add(pw.TextSpan(
+      text: linea.substring(current),
+      style: pw.TextStyle(font: monoFont, fontSize: _lyricsFontSize),
+    ));
+  }
+
+  return pw.RichText(
+    text: pw.TextSpan(children: spans),
+    softWrap: false, // igual que en la app — no rompe líneas largas
+  );
+}
 }
