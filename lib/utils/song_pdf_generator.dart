@@ -25,11 +25,19 @@ class SongPdfGenerator {
         r'(?:(?=$)|(?=[\s/]))',
   );
 
-  static final RegExp _keywordRegex = RegExp(
-    r'\b(?:VERSO(?: \d+)?|PRE-CORO|CORO 1 Y 2|'
-    r'CORO AUMENTADO|CORO(?: \d+)?|ESTRIBILLO|INSTRUMENTAL|GUITARRA|FINAL|ESTROFA|'
-    r'SOLO|PUENTE(?: \d+)?|BAJO|SALIDA(?: \d+)?)\b',
-  );
+// Regex solo para COLOREAR (incluye CANCIÓN/TONALIDAD/TIEMPO/INTRO)
+static final RegExp _keywordColorRegex = RegExp(
+  r'\b(?:CANCIÓN|TONALIDAD|TIEMPO|INTRO|VERSO(?: \d+)?|PRE-CORO|CORO 1 Y 2|'
+  r'CORO AUMENTADO|CORO(?: \d+)?|ESTRIBILLO|INSTRUMENTAL|GUITARRA|FINAL|ESTROFA|'
+  r'SOLO|PUENTE(?: \d+)?|BAJO|SALIDA(?: \d+)?)\b',
+);
+
+// Regex solo para PARTIR SECCIONES (sin CANCIÓN/TONALIDAD/TIEMPO/INTRO)
+static final RegExp _keywordRegex = RegExp(
+  r'\b(?:VERSO(?: \d+)?|PRE-CORO|CORO 1 Y 2|'
+  r'CORO AUMENTADO|CORO(?: \d+)?|ESTRIBILLO|INSTRUMENTAL|GUITARRA|FINAL|ESTROFA|'
+  r'SOLO|PUENTE(?: \d+)?|BAJO|SALIDA(?: \d+)?)\b',
+);
 
   // -----------------------------------------------------------------------
   // Colores
@@ -186,9 +194,9 @@ class SongPdfGenerator {
   final secciones = _agruparEnSecciones(lineas);
 
   // Altura aproximada por línea (fuente 10.5 + leading)
-  const double altLinea = 10.5 * 1.4;
+  const double altLinea = 10.5 * 1.2;
   const double altSeparador = 10;
-  const double altEncabezado = 90;
+  const double altEncabezado = 130;
   final double altPagina =
       PdfPageFormat.a4.height - _pageMargin.vertical - altEncabezado;
 
@@ -321,11 +329,10 @@ class SongPdfGenerator {
     }
 
     final matches = <RegExpMatch>[
-      ..._keywordRegex.allMatches(linea),
+      ..._keywordColorRegex.allMatches(linea), // ← colorRegex aquí
       ..._chordRegex.allMatches(linea),
     ]..sort((a, b) => a.start.compareTo(b.start));
 
-    // Eliminar overlaps
     final filtrados = <RegExpMatch>[];
     int lastEnd = 0;
     for (final m in matches) {
@@ -346,15 +353,14 @@ class SongPdfGenerator {
         ));
       }
       final token = match.group(0)!;
-      final esKeyword = _keywordRegex.hasMatch(token);
+      final esKeyword = _keywordColorRegex.hasMatch(token); // ← colorRegex aquí
       spans.add(pw.TextSpan(
         text: token,
         style: pw.TextStyle(
           font: monoFont,
           fontSize: _lyricsFontSize,
           color: esKeyword ? _keywordColor : _chordColor,
-          fontWeight:
-              esKeyword ? pw.FontWeight.bold : pw.FontWeight.normal,
+          fontWeight: esKeyword ? pw.FontWeight.bold : pw.FontWeight.normal,
         ),
       ));
       current = match.end;
@@ -369,7 +375,7 @@ class SongPdfGenerator {
 
     return pw.RichText(
       text: pw.TextSpan(children: spans),
-      softWrap: false, // preserva espaciado manual de acordes
+      softWrap: false,
     );
   }
 }
