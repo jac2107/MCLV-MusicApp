@@ -224,9 +224,7 @@ class SongPdfGenerator {
     // Si tiene acordes alineados con espacios → siempre 1 columna para
     // no romper el posicionado manual sobre la letra.
     // Si no tiene acordes alineados y es larga → 2 columnas.
-    final usarDosColumnas =
-        lineas.length > _maxLineasUnaColumna &&
-        !_tieneAcordesAlineados(lineas);
+    final usarDosColumnas = lineas.length > _maxLineasUnaColumna;
 
     return pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
@@ -343,7 +341,7 @@ static List<pw.Widget> _buildLyricsUnaColumna(
   // RENDERIZADO DE LETRA — 2 COLUMNAS
   // =======================================================================
 
-  static const double _alturaLineaAprox   = _lyricsFontSize * 1.15;
+  static const double _alturaLineaAprox   = _lyricsFontSize * 1.45;
   static const double _altoEncabezadoAprox = 110;
 
   /// Construye la letra en 2 columnas respetando cortes por sección
@@ -357,7 +355,7 @@ static List<pw.Widget> _buildLyricsUnaColumna(
   ///    parte línea a línea como fallback.
   /// 3. Empareja colIzq[i] con colDer[i] en Rows individuales → MultiPage
   ///    puede paginar entre cualquier par de filas sin problema.
-  static List<pw.Widget> _buildLyricsEnDosColumnas(
+ static List<pw.Widget> _buildLyricsEnDosColumnas(
   List<String> lineas,
   pw.Font monoFont,
 ) {
@@ -365,24 +363,51 @@ static List<pw.Widget> _buildLyricsUnaColumna(
 
   final double altoUtil =
       PdfPageFormat.a4.height - _pageMargin.vertical - _altoEncabezadoAprox;
-  final int lineasPorColumna =
+  final int lineasPorPagina =
       (altoUtil / _alturaLineaAprox).floor().clamp(10, 300);
+  final int lineasPorColumna = lineasPorPagina ~/ 2;
 
-  // Distribuir secciones completas entre columnas
-  final List<List<String>> seccionesIzq = [];
-  final List<List<String>> seccionesDer = [];
+  // Agrupar secciones en "páginas" de dos columnas
+  final widgets = <pw.Widget>[];
+  List<List<String>> colIzq = [];
+  List<List<String>> colDer = [];
   int lineasIzq = 0;
+  int lineasDer = 0;
 
-  for (final seccion in secciones) {
-    if (lineasIzq + seccion.length <= lineasPorColumna) {
-      seccionesIzq.add(seccion);
-      lineasIzq += seccion.length;
-    } else {
-      seccionesDer.add(seccion);
-    }
+  void flushPagina() {
+    if (colIzq.isEmpty && colDer.isEmpty) return;
+    widgets.add(_buildRowDosColumnas(colIzq, colDer, monoFont));
+    colIzq = [];
+    colDer = [];
+    lineasIzq = 0;
+    lineasDer = 0;
   }
 
-  // Construir cada columna como lista de widgets con espaciado entre secciones
+  for (final seccion in secciones) {
+    final n = seccion.length;
+    if (lineasIzq + n <= lineasPorColumna) {
+      colIzq.add(seccion);
+      lineasIzq += n;
+    } else if (lineasDer + n <= lineasPorColumna) {
+      colDer.add(seccion);
+      lineasDer += n;
+    } else {
+      // Ni izq ni der tienen espacio → flush y empezar nueva "página"
+      flushPagina();
+      colIzq.add(seccion);
+      lineasIzq += n;
+    }
+  }
+  flushPagina();
+
+  return widgets;
+}
+
+static pw.Widget _buildRowDosColumnas(
+  List<List<String>> seccionesIzq,
+  List<List<String>> seccionesDer,
+  pw.Font monoFont,
+) {
   pw.Widget buildColumna(List<List<String>> secs) {
     final widgets = <pw.Widget>[];
     for (int i = 0; i < secs.length; i++) {
@@ -400,17 +425,14 @@ static List<pw.Widget> _buildLyricsUnaColumna(
     );
   }
 
-  // Un solo Row con las dos columnas — MultiPage las pagina como bloque
-  return [
-    pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Expanded(child: buildColumna(seccionesIzq)),
-        pw.SizedBox(width: 18),
-        pw.Expanded(child: buildColumna(seccionesDer)),
-      ],
-    ),
-  ];
+  return pw.Row(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      pw.Expanded(child: buildColumna(seccionesIzq)),
+      pw.SizedBox(width: 18),
+      pw.Expanded(child: buildColumna(seccionesDer)),
+    ],
+  );
 }
 
   // =======================================================================
