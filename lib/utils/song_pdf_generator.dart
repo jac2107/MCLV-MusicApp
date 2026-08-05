@@ -1,31 +1,4 @@
 // lib/utils/song_pdf_generator.dart
-//
-// Genera un PDF presentable a partir de una o varias canciones.
-// - 1 canción: cabecera simple con título/tonalidad/tiempo + letra.
-// - 2+ canciones: portada tipo "Repertorio" con el listado (en el MISMO
-//   orden en que el usuario las seleccionó), luego cada canción en su
-//   propia página.
-//
-// Reutiliza la MISMA lógica de reconocimiento de acordes que Vcanciones.dart
-// (regex de acordes + palabras clave como CORO/VERSO/etc.) para que el PDF
-// se vea consistente con lo que el usuario ve en la app.
-//
-// IMPORTANTE: la letra y los acordes se renderizan con una fuente
-// monoespaciada (Roboto Mono) embebida, la MISMA que usa Vcanciones.dart en
-// la app. Esto garantiza que el espaciado manual calibrado con barra
-// espaciadora se vea IGUAL en la app y en el PDF compartido.
-//
-// LÓGICA DE COLUMNAS
-// ------------------
-// - Si la canción tiene acordes alineados (líneas de "solo acordes" con
-//   espacios para posicionarlos sobre la letra), se renderiza en 1 columna
-//   siempre — porque reducir el ancho a la mitad rompería el alineado.
-// - Si NO tiene acordes alineados (solo letra, o acordes simples al inicio
-//   de línea) Y supera _maxLineasUnaColumna líneas, se usa 2 columnas,
-//   partiendo por secciones (CORO/VERSO/PUENTE/etc.) para no cortar a
-//   mitad de una estrofa.
-// - En ambos casos, MultiPage recibe widgets individuales por línea (nunca
-//   un widget gigante), así puede paginar sin lanzar "Widget won't fit".
 
 import 'dart:typed_data';
 import 'package:flutter/services.dart' show rootBundle;
@@ -38,7 +11,6 @@ class SongPdfGenerator {
 
   // -----------------------------------------------------------------------
   // Reconocimiento de acordes / palabras clave
-  // Mismos patrones que en Vcanciones.dart — si cambias uno, cambia el otro.
   // -----------------------------------------------------------------------
   static final String _suffix =
       r'(?:maj7|maj|min|dim7|dim|aug|sus\d*|add\d*|m7|m9|m6|m|[°+])?';
@@ -60,18 +32,18 @@ class SongPdfGenerator {
   );
 
   // -----------------------------------------------------------------------
-  // Colores del PDF
+  // Colores
   // -----------------------------------------------------------------------
   static final PdfColor _chordColor   = PdfColor.fromInt(0xFF7EA0B0);
   static final PdfColor _keywordColor = PdfColor.fromInt(0xFFC9A24B);
   static final PdfColor _textColor    = PdfColors.black;
   static final PdfColor _titleColor   = PdfColor.fromInt(0xFF1B1E23);
 
-  static const double _lyricsFontSize      = 10.5;
-  static const int    _maxLineasUnaColumna = 40;
+  static const double _lyricsFontSize = 10.5;
 
-  static const pw.EdgeInsets _pageMargin = pw.EdgeInsets.only(
-    left: 14, right: 14, top: 24, bottom: 24,
+  static const pw.EdgeInsets _pageMargin = pw.EdgeInsets.symmetric(
+    horizontal: 36,
+    vertical: 36,
   );
 
   static pw.Font? _monoFont;
@@ -93,8 +65,8 @@ class SongPdfGenerator {
     String? tituloRepertorio,
   }) async {
     final monoFont = await _loadMonoFont();
-
     final doc = pw.Document();
+
     final tieneTitulo =
         tituloRepertorio != null && tituloRepertorio.trim().isNotEmpty;
     final mostrarPortada = canciones.length > 1 || tieneTitulo;
@@ -104,7 +76,7 @@ class SongPdfGenerator {
     }
 
     for (final cancion in canciones) {
-      doc.addPage(_buildSongDocument(cancion, monoFont));
+      doc.addPage(_buildSongPage(cancion, monoFont));
     }
 
     return doc.save();
@@ -122,31 +94,29 @@ class SongPdfGenerator {
     return pw.Page(
       pageFormat: PdfPageFormat.a4,
       margin: const pw.EdgeInsets.all(36),
-      build: (context) {
-        return pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.SizedBox(height: 60),
-            pw.Text(
-              titulo?.isNotEmpty == true ? titulo! : 'Repertorio',
-              style: pw.TextStyle(
-                fontSize: 28,
-                fontWeight: pw.FontWeight.bold,
-                color: _titleColor,
-              ),
+      build: (context) => pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.SizedBox(height: 60),
+          pw.Text(
+            titulo?.isNotEmpty == true ? titulo! : 'Repertorio',
+            style: pw.TextStyle(
+              fontSize: 28,
+              fontWeight: pw.FontWeight.bold,
+              color: _titleColor,
             ),
-            pw.SizedBox(height: 4),
-            pw.Text(
-              'MCLV MusicApp',
-              style: pw.TextStyle(fontSize: 12, color: _chordColor),
-            ),
-            pw.SizedBox(height: 30),
-            pw.Divider(color: _keywordColor, thickness: 2),
-            pw.SizedBox(height: 20),
-            ..._buildIndice(canciones, categoriaDe),
-          ],
-        );
-      },
+          ),
+          pw.SizedBox(height: 4),
+          pw.Text(
+            'MCLV MusicApp',
+            style: pw.TextStyle(fontSize: 12, color: _chordColor),
+          ),
+          pw.SizedBox(height: 30),
+          pw.Divider(color: _keywordColor, thickness: 2),
+          pw.SizedBox(height: 20),
+          ..._buildIndice(canciones, categoriaDe),
+        ],
+      ),
     );
   }
 
@@ -154,89 +124,93 @@ class SongPdfGenerator {
     List<Song> canciones,
     String? Function(Song song)? categoriaDe,
   ) {
-    final widgets = <pw.Widget>[];
-
-    for (var i = 0; i < canciones.length; i++) {
+    return List.generate(canciones.length, (i) {
       final song = canciones[i];
       final categoria = categoriaDe?.call(song);
-
-      widgets.add(
-        pw.Padding(
-          padding: const pw.EdgeInsets.symmetric(vertical: 5),
-          child: pw.Row(
-            children: [
-              pw.Container(
-                width: 24,
-                child: pw.Text(
-                  '${i + 1}.',
-                  style: pw.TextStyle(
-                    fontSize: 13,
-                    fontWeight: pw.FontWeight.bold,
-                    color: _chordColor,
-                  ),
-                ),
-              ),
-              pw.Expanded(
-                child: pw.Text(
-                  song.title,
-                  style: pw.TextStyle(fontSize: 13, color: _textColor),
-                ),
-              ),
-              if (categoria != null && categoria.isNotEmpty)
-                pw.Container(
-                  margin: const pw.EdgeInsets.only(right: 8),
-                  padding: const pw.EdgeInsets.symmetric(
-                    horizontal: 6, vertical: 2,
-                  ),
-                  decoration: pw.BoxDecoration(
-                    color: PdfColor.fromInt(0xFFF5F1E8),
-                    borderRadius: pw.BorderRadius.circular(3),
-                  ),
-                  child: pw.Text(
-                    categoria,
-                    style: pw.TextStyle(fontSize: 9, color: _chordColor),
-                  ),
-                ),
-              pw.Text(
-                song.tonalidad,
+      return pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 5),
+        child: pw.Row(
+          children: [
+            pw.Container(
+              width: 24,
+              child: pw.Text(
+                '${i + 1}.',
                 style: pw.TextStyle(
-                  fontSize: 11,
-                  color: _chordColor,
+                  fontSize: 13,
                   fontWeight: pw.FontWeight.bold,
+                  color: _chordColor,
                 ),
               ),
-            ],
-          ),
+            ),
+            pw.Expanded(
+              child: pw.Text(
+                song.title,
+                style: pw.TextStyle(fontSize: 13, color: _textColor),
+              ),
+            ),
+            if (categoria != null && categoria.isNotEmpty)
+              pw.Container(
+                margin: const pw.EdgeInsets.only(right: 8),
+                padding: const pw.EdgeInsets.symmetric(
+                  horizontal: 6, vertical: 2,
+                ),
+                decoration: pw.BoxDecoration(
+                  color: PdfColor.fromInt(0xFFF5F1E8),
+                  borderRadius: pw.BorderRadius.circular(3),
+                ),
+                child: pw.Text(
+                  categoria,
+                  style: pw.TextStyle(fontSize: 9, color: _chordColor),
+                ),
+              ),
+            pw.Text(
+              song.tonalidad,
+              style: pw.TextStyle(
+                fontSize: 11,
+                color: _chordColor,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+          ],
         ),
       );
-    }
-
-    return widgets;
+    });
   }
 
   // =======================================================================
-  // PÁGINA(S) DE CANCIÓN
+  // PÁGINA DE CANCIÓN — MultiPage, 1 columna, corte por secciones
   // =======================================================================
 
-  static pw.MultiPage _buildSongDocument(Song cancion, pw.Font monoFont) {
+  static pw.MultiPage _buildSongPage(Song cancion, pw.Font monoFont) {
     final lineas = cancion.text.split('\n');
-
-    // Si tiene acordes alineados con espacios → siempre 1 columna para
-    // no romper el posicionado manual sobre la letra.
-    // Si no tiene acordes alineados y es larga → 2 columnas.
-    final usarDosColumnas = lineas.length > _maxLineasUnaColumna;
+    final secciones = _agruparEnSecciones(lineas);
 
     return pw.MultiPage(
       pageFormat: PdfPageFormat.a4,
       margin: _pageMargin,
+      // Encabezado solo en la primera página
       header: (context) => context.pageNumber == 1
           ? _buildEncabezado(cancion)
           : pw.SizedBox(),
-      build: (context) => usarDosColumnas
-          ? _buildLyricsEnDosColumnas(lineas, monoFont)
-          : _buildLyricsUnaColumna(lineas, monoFont),
+      // Cada sección es un widget independiente en la lista.
+      // MultiPage intenta no cortar un widget individual entre páginas —
+      // si la sección entera no cabe en el espacio restante, la pasa
+      // completa a la página siguiente. Solo la corta si es más alta que
+      // una página completa (caso extremo).
+      build: (context) {
+        final widgets = <pw.Widget>[];
+        for (int i = 0; i < secciones.length; i++) {
+          if (i > 0) widgets.add(pw.SizedBox(height: 10));
+          widgets.add(_buildSeccion(secciones[i], monoFont));
+        }
+        return widgets;
+      },
     );
   }
+
+  // =======================================================================
+  // ENCABEZADO
+  // =======================================================================
 
   static pw.Widget _buildEncabezado(Song cancion) {
     return pw.Column(
@@ -258,9 +232,9 @@ class SongPdfGenerator {
             if (cancion.tiempo > 0) _buildTag('${cancion.tiempo} bpm'),
           ],
         ),
-        pw.SizedBox(height: 4),
+        pw.SizedBox(height: 8),
         pw.Divider(color: PdfColors.grey400),
-        pw.SizedBox(height: 10),
+        pw.SizedBox(height: 12),
       ],
     );
   }
@@ -279,105 +253,26 @@ class SongPdfGenerator {
     );
   }
 
-
   // =======================================================================
-  // RENDERIZADO DE LETRA — 1 COLUMNA
+  // SECCIÓN COMO BLOQUE ÚNICO
   // =======================================================================
 
-  /// Una lista plana de widgets, uno por línea. MultiPage los pagina solo.
-static List<pw.Widget> _buildLyricsUnaColumna(
-  List<String> lineas,
-  pw.Font monoFont,
-) {
-  final secciones = _agruparEnSecciones(lineas);
-  final widgets = <pw.Widget>[];
-
-  for (int i = 0; i < secciones.length; i++) {
-    final seccion = secciones[i];
-    // Espacio antes de cada sección (excepto la primera)
-    if (i > 0) widgets.add(pw.SizedBox(height: 8));
-
-    // Toda la sección como un Column → MultiPage intenta no partirla
-    widgets.add(
-      pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: seccion
-            .map((linea) => _buildLineaWidget(linea, monoFont))
-            .toList(growable: false),
-      ),
+  /// Toda la sección (VERSO/CORO/PUENTE/etc.) como un pw.Column.
+  /// MultiPage lo trata como unidad — si no cabe en el espacio restante
+  /// de la página, salta completo a la siguiente.
+  static pw.Widget _buildSeccion(List<String> lineas, pw.Font monoFont) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: lineas
+          .map((linea) => _buildLineaWidget(linea, monoFont))
+          .toList(growable: false),
     );
   }
-  return widgets;
-}
-
-  // =======================================================================
-  // RENDERIZADO DE LETRA — 2 COLUMNAS
-  // =======================================================================
-
-  static const double _alturaLineaAprox   = _lyricsFontSize * 1.45;
-  static const double _altoEncabezadoAprox = 110;
-
-  /// Construye la letra en 2 columnas respetando cortes por sección
-  /// (CORO/VERSO/PUENTE/etc.). Entrega a MultiPage una lista de Rows
-  /// individuales de una línea — nunca un Row gigante que no cabe en página.
-  ///
-  /// Algoritmo:
-  /// 1. Agrupa líneas en secciones por palabra clave.
-  /// 2. Llena colIzq con secciones completas hasta el límite; el resto
-  ///    va a colDer. Si una sección no cabe en ninguna (es gigante), se
-  ///    parte línea a línea como fallback.
-  /// 3. Empareja colIzq[i] con colDer[i] en Rows individuales → MultiPage
-  ///    puede paginar entre cualquier par de filas sin problema.
-static List<pw.Widget> _buildLyricsEnDosColumnas(
-  List<String> lineas,
-  pw.Font monoFont,
-) {
-  final secciones = _agruparEnSecciones(lineas);
-
-  final double altoUtil =
-      PdfPageFormat.a4.height - _pageMargin.vertical - _altoEncabezadoAprox;
-  final int lineasPorColumna =
-      (altoUtil / _alturaLineaAprox).floor().clamp(10, 300);
-
-  // Distribuir secciones en columna izq y der
-  final List<String> colIzq = [];
-  final List<String> colDer = [];
-
-  for (final seccion in secciones) {
-    if (colIzq.length + seccion.length <= lineasPorColumna) {
-      colIzq.addAll(seccion);
-    } else {
-      colDer.addAll(seccion);
-    }
-  }
-
-  // Igualar longitud con líneas vacías
-  while (colIzq.length < colDer.length) colIzq.add('');
-  while (colDer.length < colIzq.length) colDer.add('');
-
-  // Devolver un Row por cada fila — MultiPage puede paginar entre filas
-  final widgets = <pw.Widget>[];
-  for (int i = 0; i < colIzq.length; i++) {
-    widgets.add(pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Expanded(child: _buildLineaWidget(colIzq[i], monoFont)),
-        pw.SizedBox(width: 18),
-        pw.Expanded(child: _buildLineaWidget(colDer[i], monoFont)),
-      ],
-    ));
-  }
-  return widgets;
-}
-
-
 
   // =======================================================================
   // AGRUPACIÓN EN SECCIONES
   // =======================================================================
 
-  /// Agrupa líneas en secciones: cada sección empieza con una palabra clave
-  /// (CORO/VERSO/PUENTE/ESTRIBILLO/etc.) y llega hasta la siguiente.
   static List<List<String>> _agruparEnSecciones(List<String> lineas) {
     final secciones = <List<String>>[];
     List<String> actual = [];
@@ -390,7 +285,6 @@ static List<pw.Widget> _buildLyricsEnDosColumnas(
         actual.add(linea);
       }
     }
-
     if (actual.isNotEmpty) secciones.add(actual);
 
     return secciones;
@@ -400,64 +294,61 @@ static List<pw.Widget> _buildLyricsEnDosColumnas(
   // WIDGET DE LÍNEA INDIVIDUAL
   // =======================================================================
 
-  /// Construye una línea coloreando acordes (azul) y keywords (dorado),
-  /// usando siempre la misma fuente monoespaciada y el mismo tamaño para
-  /// mantener el alineado calibrado manualmente.
   static pw.Widget _buildLineaWidget(String linea, pw.Font monoFont) {
-  if (linea.trim().isEmpty) {
-    // Línea vacía del texto original → espacio visual entre párrafos
-    return pw.SizedBox(height: 6);
-  }
-
-  final spans = <pw.TextSpan>[];
-
-  final matches = <RegExpMatch>[
-    ..._keywordRegex.allMatches(linea),
-    ..._chordRegex.allMatches(linea),
-  ]..sort((a, b) => a.start.compareTo(b.start));
-
-  // Filtrar overlaps (keyword y chord pueden matchear lo mismo)
-  final filtrados = <RegExpMatch>[];
-  int lastEnd = 0;
-  for (final m in matches) {
-    if (m.start >= lastEnd) {
-      filtrados.add(m);
-      lastEnd = m.end;
+    if (linea.trim().isEmpty) {
+      return pw.SizedBox(height: 5);
     }
-  }
 
-  int current = 0;
-  for (final match in filtrados) {
-    if (match.start > current) {
+    final matches = <RegExpMatch>[
+      ..._keywordRegex.allMatches(linea),
+      ..._chordRegex.allMatches(linea),
+    ]..sort((a, b) => a.start.compareTo(b.start));
+
+    // Eliminar overlaps
+    final filtrados = <RegExpMatch>[];
+    int lastEnd = 0;
+    for (final m in matches) {
+      if (m.start >= lastEnd) {
+        filtrados.add(m);
+        lastEnd = m.end;
+      }
+    }
+
+    final spans = <pw.TextSpan>[];
+    int current = 0;
+
+    for (final match in filtrados) {
+      if (match.start > current) {
+        spans.add(pw.TextSpan(
+          text: linea.substring(current, match.start),
+          style: pw.TextStyle(font: monoFont, fontSize: _lyricsFontSize),
+        ));
+      }
+      final token = match.group(0)!;
+      final esKeyword = _keywordRegex.hasMatch(token);
       spans.add(pw.TextSpan(
-        text: linea.substring(current, match.start),
+        text: token,
+        style: pw.TextStyle(
+          font: monoFont,
+          fontSize: _lyricsFontSize,
+          color: esKeyword ? _keywordColor : _chordColor,
+          fontWeight:
+              esKeyword ? pw.FontWeight.bold : pw.FontWeight.normal,
+        ),
+      ));
+      current = match.end;
+    }
+
+    if (current < linea.length) {
+      spans.add(pw.TextSpan(
+        text: linea.substring(current),
         style: pw.TextStyle(font: monoFont, fontSize: _lyricsFontSize),
       ));
     }
-    final token = match.group(0)!;
-    final esKeyword = _keywordRegex.hasMatch(token);
-    spans.add(pw.TextSpan(
-      text: token,
-      style: pw.TextStyle(
-        font: monoFont,
-        fontSize: _lyricsFontSize,
-        color: esKeyword ? _keywordColor : _chordColor,
-        fontWeight: esKeyword ? pw.FontWeight.bold : pw.FontWeight.normal,
-      ),
-    ));
-    current = match.end;
-  }
 
-  if (current < linea.length) {
-    spans.add(pw.TextSpan(
-      text: linea.substring(current),
-      style: pw.TextStyle(font: monoFont, fontSize: _lyricsFontSize),
-    ));
+    return pw.RichText(
+      text: pw.TextSpan(children: spans),
+      softWrap: false, // preserva espaciado manual de acordes
+    );
   }
-
-  return pw.RichText(
-    text: pw.TextSpan(children: spans),
-    softWrap: true, // igual que en la app — no rompe líneas largas
-  );
-}
 }
