@@ -26,8 +26,8 @@ class SongPdfGenerator {
   );
 
   static final RegExp _keywordRegex = RegExp(
-    r'\b(?:CANCIÓN|TONALIDAD|TIEMPO|INTRO|VERSO(?: \d+)?|PRE-CORO|CORO 1 Y 2|'
-    r'CORO AUMENTADO|CORO(?: \d+)?|ESTRIBILLO|INSTRUMENTAL|FINAL|ESTROFA|'
+    r'\b(?:VERSO(?: \d+)?|PRE-CORO|CORO 1 Y 2|'
+    r'CORO AUMENTADO|CORO(?: \d+)?|ESTRIBILLO|INSTRUMENTAL|GUITARRA|FINAL|ESTROFA|'
     r'SOLO|PUENTE(?: \d+)?|BAJO|SALIDA(?: \d+)?)\b',
   );
 
@@ -181,32 +181,53 @@ class SongPdfGenerator {
   // PÁGINA DE CANCIÓN — MultiPage, 1 columna, corte por secciones
   // =======================================================================
 
-  static pw.MultiPage _buildSongPage(Song cancion, pw.Font monoFont) {
-    final lineas = cancion.text.split('\n');
-    final secciones = _agruparEnSecciones(lineas);
+ static pw.MultiPage _buildSongPage(Song cancion, pw.Font monoFont) {
+  final lineas = cancion.text.split('\n');
+  final secciones = _agruparEnSecciones(lineas);
 
-    return pw.MultiPage(
-      pageFormat: PdfPageFormat.a4,
-      margin: _pageMargin,
-      // Encabezado solo en la primera página
-      header: (context) => context.pageNumber == 1
-          ? _buildEncabezado(cancion)
-          : pw.SizedBox(),
-      // Cada sección es un widget independiente en la lista.
-      // MultiPage intenta no cortar un widget individual entre páginas —
-      // si la sección entera no cabe en el espacio restante, la pasa
-      // completa a la página siguiente. Solo la corta si es más alta que
-      // una página completa (caso extremo).
-      build: (context) {
-        final widgets = <pw.Widget>[];
-        for (int i = 0; i < secciones.length; i++) {
-          if (i > 0) widgets.add(pw.SizedBox(height: 10));
-          widgets.add(_buildSeccion(secciones[i], monoFont));
+  // Altura aproximada por línea (fuente 10.5 + leading)
+  const double altLinea = 10.5 * 1.4;
+  const double altSeparador = 10;
+  const double altEncabezado = 90;
+  final double altPagina =
+      PdfPageFormat.a4.height - _pageMargin.vertical - altEncabezado;
+
+  return pw.MultiPage(
+    pageFormat: PdfPageFormat.a4,
+    margin: _pageMargin,
+    header: (context) => context.pageNumber == 1
+        ? _buildEncabezado(cancion)
+        : pw.SizedBox(),
+    build: (context) {
+      final widgets = <pw.Widget>[];
+      double altUsada = 0;
+
+      for (int i = 0; i < secciones.length; i++) {
+        final seccion = secciones[i];
+        final altSeccion = seccion.length * altLinea;
+        final altConSep = altSeccion + (i > 0 ? altSeparador : 0);
+
+        // Si no cabe en lo que queda de página → forzar salto
+        if (altUsada > 0 && altUsada + altConSep > altPagina) {
+          widgets.add(pw.NewPage());
+          altUsada = 0;
         }
-        return widgets;
-      },
-    );
-  }
+
+        if (i > 0 && altUsada > 0) {
+          widgets.add(pw.SizedBox(height: altSeparador));
+          altUsada += altSeparador;
+        }
+
+        for (final linea in seccion) {
+          widgets.add(_buildLineaWidget(linea, monoFont));
+          altUsada += altLinea;
+        }
+      }
+
+      return widgets;
+    },
+  );
+}
 
   // =======================================================================
   // ENCABEZADO
