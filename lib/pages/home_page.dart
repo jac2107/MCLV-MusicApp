@@ -8,6 +8,7 @@ import 'para_mejorar_page.dart';
 import 'categoria_page.dart';
 import 'song_picker_page.dart';
 import 'favoritos_page.dart';
+import '../pages/song_picker_page.dart';
 import '../utils/background_painters.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../utils/version_checker.dart';

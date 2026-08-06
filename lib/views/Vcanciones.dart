@@ -11,7 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../utils/app_theme.dart';
 import '../utils/song_pdf_generator.dart';
-import '../pages/song_picker_page.dart';
+import '../pages/song_picker_page.dart' hide SongPdfGenerator;
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/favorites_repository.dart';
