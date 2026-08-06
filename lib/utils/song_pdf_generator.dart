@@ -196,9 +196,10 @@ static final RegExp _keywordRegex = RegExp(
   // Altura aproximada por línea (fuente 10.5 + leading)
   const double altLinea = 10.5 * 1.2;
   const double altSeparador = 10;
-  const double altEncabezado = 130;
-  final double altPagina =
-      PdfPageFormat.a4.height - _pageMargin.vertical - altEncabezado;
+  const double altEncabezadoPag1 = 130;
+  final double altPaginaUtil = PdfPageFormat.a4.height - _pageMargin.vertical;
+  final double altPagina1 = altPaginaUtil - altEncabezadoPag1;
+  final double altPaginaSig = altPaginaUtil;
 
   return pw.MultiPage(
     pageFormat: PdfPageFormat.a4,
@@ -207,33 +208,35 @@ static final RegExp _keywordRegex = RegExp(
         ? _buildEncabezado(cancion)
         : pw.SizedBox(),
     build: (context) {
-      final widgets = <pw.Widget>[];
-      double altUsada = 0;
+        final widgets = <pw.Widget>[];
+        double altUsada = 0;
+        bool primeraPagina = true;
 
-      for (int i = 0; i < secciones.length; i++) {
-        final seccion = secciones[i];
-        final altSeccion = seccion.length * altLinea;
-        final altConSep = altSeccion + (i > 0 ? altSeparador : 0);
+        for (int i = 0; i < secciones.length; i++) {
+          final seccion = secciones[i];
+          final altSeccion = seccion.length * altLinea;
+          final altConSep = altSeccion + (i > 0 ? altSeparador : 0);
+          final double limiteActual = primeraPagina ? altPagina1 : altPaginaSig;
 
-        // Si no cabe en lo que queda de página → forzar salto
-        if (altUsada > 0 && altUsada + altConSep > altPagina) {
-          widgets.add(pw.NewPage());
-          altUsada = 0;
+          if (altUsada > 0 && altUsada + altConSep > limiteActual) {
+            widgets.add(pw.NewPage());
+            altUsada = 0;
+            primeraPagina = false;
+          }
+
+          if (i > 0 && altUsada > 0) {
+            widgets.add(pw.SizedBox(height: altSeparador));
+            altUsada += altSeparador;
+          }
+
+          for (final linea in seccion) {
+            widgets.add(_buildLineaWidget(linea, monoFont));
+            altUsada += altLinea;
+          }
         }
 
-        if (i > 0 && altUsada > 0) {
-          widgets.add(pw.SizedBox(height: altSeparador));
-          altUsada += altSeparador;
-        }
-
-        for (final linea in seccion) {
-          widgets.add(_buildLineaWidget(linea, monoFont));
-          altUsada += altLinea;
-        }
-      }
-
-      return widgets;
-    },
+        return widgets;
+      },
   );
 }
 
