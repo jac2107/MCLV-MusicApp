@@ -32,13 +32,6 @@ static final RegExp _keywordColorRegex = RegExp(
   r'SOLO|PUENTE(?: \d+)?|BAJO|SALIDA(?: \d+)?)\b',
 );
 
-// Regex solo para PARTIR SECCIONES (sin CANCIÓN/TONALIDAD/TIEMPO/INTRO)
-static final RegExp _keywordRegex = RegExp(
-  r'\b(?:VERSO(?: \d+)?|PRE-CORO|CORO 1 Y 2|'
-  r'CORO AUMENTADO|CORO(?: \d+)?|ESTRIBILLO|INSTRUMENTAL|GUITARRA|FINAL|ESTROFA|'
-  r'SOLO|PUENTE(?: \d+)?|BAJO|SALIDA(?: \d+)?)\b',
-);
-
   // -----------------------------------------------------------------------
   // Colores
   // -----------------------------------------------------------------------
@@ -47,7 +40,7 @@ static final RegExp _keywordRegex = RegExp(
   static final PdfColor _textColor    = PdfColors.black;
   static final PdfColor _titleColor   = PdfColor.fromInt(0xFF1B1E23);
 
-  static const double _lyricsFontSize = 10.5;
+  static const double _lyricsFontSize = 13;
 
   static const pw.EdgeInsets _pageMargin = pw.EdgeInsets.symmetric(
     horizontal: 36,
@@ -191,15 +184,6 @@ static final RegExp _keywordRegex = RegExp(
 
  static pw.MultiPage _buildSongPage(Song cancion, pw.Font monoFont) {
   final lineas = cancion.text.split('\n');
-  final secciones = _agruparEnSecciones(lineas);
-
-  // Altura aproximada por línea (fuente 10.5 + leading)
-  const double altLinea = 10.5 * 1.2;
-  const double altSeparador = 10;
-  const double altEncabezadoPag1 = 130;
-  final double altPaginaUtil = PdfPageFormat.a4.height - _pageMargin.vertical;
-  final double altPagina1 = altPaginaUtil - altEncabezadoPag1;
-  final double altPaginaSig = altPaginaUtil;
 
   return pw.MultiPage(
     pageFormat: PdfPageFormat.a4,
@@ -207,36 +191,9 @@ static final RegExp _keywordRegex = RegExp(
     header: (context) => context.pageNumber == 1
         ? _buildEncabezado(cancion)
         : pw.SizedBox(),
-    build: (context) {
-        final widgets = <pw.Widget>[];
-        double altUsada = 0;
-        bool primeraPagina = true;
-
-        for (int i = 0; i < secciones.length; i++) {
-          final seccion = secciones[i];
-          final altSeccion = seccion.length * altLinea;
-          final altConSep = altSeccion + (i > 0 ? altSeparador : 0);
-          final double limiteActual = primeraPagina ? altPagina1 : altPaginaSig;
-
-          if (altUsada > 0 && altUsada + altConSep > limiteActual) {
-            widgets.add(pw.NewPage());
-            altUsada = 0;
-            primeraPagina = false;
-          }
-
-          if (i > 0 && altUsada > 0) {
-            widgets.add(pw.SizedBox(height: altSeparador));
-            altUsada += altSeparador;
-          }
-
-          for (final linea in seccion) {
-            widgets.add(_buildLineaWidget(linea, monoFont));
-            altUsada += altLinea;
-          }
-        }
-
-        return widgets;
-      },
+    build: (context) => lineas
+        .map((linea) => _buildLineaWidget(linea, monoFont))
+        .toList(),
   );
 }
 
@@ -283,43 +240,6 @@ static final RegExp _keywordRegex = RegExp(
         style: pw.TextStyle(fontSize: 10, color: _chordColor),
       ),
     );
-  }
-
-  // =======================================================================
-  // SECCIÓN COMO BLOQUE ÚNICO
-  // =======================================================================
-
-  /// Toda la sección (VERSO/CORO/PUENTE/etc.) como un pw.Column.
-  /// MultiPage lo trata como unidad — si no cabe en el espacio restante
-  /// de la página, salta completo a la siguiente.
-  static pw.Widget _buildSeccion(List<String> lineas, pw.Font monoFont) {
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: lineas
-          .map((linea) => _buildLineaWidget(linea, monoFont))
-          .toList(growable: false),
-    );
-  }
-
-  // =======================================================================
-  // AGRUPACIÓN EN SECCIONES
-  // =======================================================================
-
-  static List<List<String>> _agruparEnSecciones(List<String> lineas) {
-    final secciones = <List<String>>[];
-    List<String> actual = [];
-
-    for (final linea in lineas) {
-      if (_keywordRegex.hasMatch(linea) && actual.isNotEmpty) {
-        secciones.add(actual);
-        actual = [linea];
-      } else {
-        actual.add(linea);
-      }
-    }
-    if (actual.isNotEmpty) secciones.add(actual);
-
-    return secciones;
   }
 
   // =======================================================================
