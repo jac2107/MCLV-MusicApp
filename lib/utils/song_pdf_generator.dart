@@ -40,7 +40,6 @@ static final RegExp _keywordColorRegex = RegExp(
   static final PdfColor _textColor    = PdfColors.black;
   static final PdfColor _titleColor   = PdfColor.fromInt(0xFF1B1E23);
 
-  static const double _lyricsFontSize = 13;
 
   static const pw.EdgeInsets _pageMargin = pw.EdgeInsets.symmetric(
     horizontal: 36,
@@ -64,6 +63,8 @@ static final RegExp _keywordColorRegex = RegExp(
     required List<Song> canciones,
     String? Function(Song song)? categoriaDe,
     String? tituloRepertorio,
+    double fontSize = 10.5, // ← agregar
+
   }) async {
     final monoFont = await _loadMonoFont();
     final doc = pw.Document();
@@ -77,7 +78,7 @@ static final RegExp _keywordColorRegex = RegExp(
     }
 
     for (final cancion in canciones) {
-      doc.addPage(_buildSongPage(cancion, monoFont));
+      doc.addPage(_buildSongPage(cancion, monoFont, fontSize));
     }
 
     return doc.save();
@@ -182,20 +183,21 @@ static final RegExp _keywordColorRegex = RegExp(
   // PÁGINA DE CANCIÓN — MultiPage, 1 columna, corte por secciones
   // =======================================================================
 
- static pw.MultiPage _buildSongPage(Song cancion, pw.Font monoFont) {
-  final lineas = cancion.text.split('\n');
+// _buildSongPage recibe fontSize:
+  static pw.MultiPage _buildSongPage(Song cancion, pw.Font monoFont, double fontSize) {
+    final lineas = cancion.text.split('\n');
 
-  return pw.MultiPage(
-    pageFormat: PdfPageFormat.a4,
-    margin: _pageMargin,
-    header: (context) => context.pageNumber == 1
-        ? _buildEncabezado(cancion)
-        : pw.SizedBox(),
-    build: (context) => lineas
-        .map((linea) => _buildLineaWidget(linea, monoFont))
-        .toList(),
-  );
-}
+    return pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: _pageMargin,
+      header: (context) => context.pageNumber == 1
+          ? _buildEncabezado(cancion)
+          : pw.SizedBox(),
+      build: (context) => lineas
+          .map((linea) => _buildLineaWidget(linea, monoFont, fontSize))
+          .toList(),
+    );
+  }
 
   // =======================================================================
   // ENCABEZADO
@@ -246,10 +248,10 @@ static final RegExp _keywordColorRegex = RegExp(
   // WIDGET DE LÍNEA INDIVIDUAL
   // =======================================================================
 
-  static pw.Widget _buildLineaWidget(String linea, pw.Font monoFont) {
-    if (linea.trim().isEmpty) {
-      return pw.SizedBox(height: 5);
-    }
+// _buildLineaWidget recibe fontSize:
+static pw.Widget _buildLineaWidget(String linea, pw.Font monoFont, double fontSize) {
+  if (linea.trim().isEmpty) return pw.SizedBox(height: 5);
+
 
     final matches = <RegExpMatch>[
       ..._keywordColorRegex.allMatches(linea), // ← colorRegex aquí
@@ -272,7 +274,7 @@ static final RegExp _keywordColorRegex = RegExp(
       if (match.start > current) {
         spans.add(pw.TextSpan(
           text: linea.substring(current, match.start),
-          style: pw.TextStyle(font: monoFont, fontSize: _lyricsFontSize),
+          style: pw.TextStyle(font: monoFont, fontSize: fontSize),
         ));
       }
       final token = match.group(0)!;
@@ -281,7 +283,7 @@ static final RegExp _keywordColorRegex = RegExp(
         text: token,
         style: pw.TextStyle(
           font: monoFont,
-          fontSize: _lyricsFontSize,
+          fontSize: fontSize,
           color: esKeyword ? _keywordColor : _chordColor,
           fontWeight: esKeyword ? pw.FontWeight.bold : pw.FontWeight.normal,
         ),
@@ -292,7 +294,7 @@ static final RegExp _keywordColorRegex = RegExp(
     if (current < linea.length) {
       spans.add(pw.TextSpan(
         text: linea.substring(current),
-        style: pw.TextStyle(font: monoFont, fontSize: _lyricsFontSize),
+        style: pw.TextStyle(font: monoFont, fontSize: fontSize),
       ));
     }
 

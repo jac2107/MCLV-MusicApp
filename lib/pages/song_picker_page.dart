@@ -1,570 +1,307 @@
-// lib/pages/song_picker_page.dart
-//
-// Permite elegir una o varias canciones (mezclando Adoración y Alabanza)
-// para armar un "medley/repertorio compartido": un PDF con portada +
-// todas las canciones en el MISMO orden en que el usuario las fue
-// seleccionando, o el texto plano equivalente vía share_plus.
-//
-// Cada canción seleccionada puede transponerse individualmente SOLO para
-// esta exportación (PDF/texto) — el ajuste vive únicamente en esta
-// pantalla (_transposiciones) y nunca toca el Song original en caché ni en
-// Firestore. Al salir de esta pantalla, el ajuste se pierde, que es la
-// intención: es una transposición "de una sola vez" para compartir.
+// lib/utils/song_pdf_generator.dart
 
-import 'package:flutter/material.dart';
-import 'package:printing/printing.dart';
-import 'package:share_plus/share_plus.dart';
+import 'dart:typed_data';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import '../models/Mcanciones.dart';
-import '../models/song_repository.dart';
-import '../utils/app_theme.dart';
-import '../utils/song_pdf_generator.dart';
-import '../utils/chord_transposer.dart';
 
-class SongPickerPage extends StatefulWidget {
-  /// Canciones que llegan ya marcadas al abrir la pantalla (ej. cuando el
-  /// usuario venía de "Elegir varias" desde una canción individual).
-  final List<Song> preseleccionadas;
+class SongPdfGenerator {
+  SongPdfGenerator._();
 
-  const SongPickerPage({super.key, this.preseleccionadas = const []});
+  // -----------------------------------------------------------------------
+  // Reconocimiento de acordes / palabras clave
+  // -----------------------------------------------------------------------
+  static final String _suffix =
+      r'(?:maj7|maj|min|dim7|dim|aug|sus\d*|add\d*|m7|m9|m6|m|[°+])?';
+  static final String _bassPart = r'(?:\/[A-G][#b]?' + _suffix + r'\d*)*';
+  static final String _chordUnit =
+      r'[A-G][#b]?' + _suffix + r'\d*' + _bassPart;
 
-  @override
-  State<SongPickerPage> createState() => _SongPickerPageState();
-}
+  static final RegExp _chordRegex = RegExp(
+    r'(?:(?<=^)|(?<=\s))' +
+        '(?:$_chordUnit)' +
+        '(?:-(?:$_chordUnit))*' +
+        r'(?:(?=$)|(?=[\s/]))',
+  );
 
-class _SongPickerPageState extends State<SongPickerPage>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+// Regex solo para COLOREAR (incluye CANCIÓN/TONALIDAD/TIEMPO/INTRO)
+static final RegExp _keywordColorRegex = RegExp(
+  r'\b(?:CANCIÓN|TONALIDAD|TIEMPO|INTRO|VERSO(?: \d+)?|PRE-CORO|CORO 1 Y 2|'
+  r'CORO AUMENTADO|CORO(?: \d+)?|ESTRIBILLO|INSTRUMENTAL|GUITARRA|FINAL|ESTROFA|'
+  r'SOLO|PUENTE(?: \d+)?|BAJO|SALIDA(?: \d+)?)\b',
+);
 
-  List<Song> _adoracion = [];
-  List<Song> _alabanza = [];
-  bool _cargando = true;
+  // -----------------------------------------------------------------------
+  // Colores
+  // -----------------------------------------------------------------------
+  static final PdfColor _chordColor   = PdfColor.fromInt(0xFF7EA0B0);
+  static final PdfColor _keywordColor = PdfColor.fromInt(0xFFC9A24B);
+  static final PdfColor _textColor    = PdfColors.black;
+  static final PdfColor _titleColor   = PdfColor.fromInt(0xFF1B1E23);
 
-  // Selección por título (para no perderla al cambiar de pestaña).
-  // IMPORTANTE: en Dart, un Map (LinkedHashMap por defecto) preserva el
-  // orden de INSERCIÓN de sus claves. Esto es lo que usamos como fuente de
-  // verdad del orden en que el usuario fue tocando canciones — NUNCA hay
-  // que reconstruir el orden desde _adoracion/_alabanza (que están
-  // ordenadas alfabéticamente), o se pierde el orden real de selección.
-  final Map<String, Song> _seleccionadas = {};
+  static const double _lyricsFontSize = 13;
 
-  // Semitonos de transposición SOLO para esta exportación, por título de
-  // canción. 0 = tonalidad original (comportamiento de siempre).
-  final Map<String, int> _transposiciones = {};
+  static const pw.EdgeInsets _pageMargin = pw.EdgeInsets.symmetric(
+    horizontal: 36,
+    vertical: 36,
+  );
 
-  final TextEditingController _tituloController = TextEditingController();
+  static pw.Font? _monoFont;
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    for (final s in widget.preseleccionadas) {
-      _seleccionadas[s.title] = s;
-    }
-    _cargarCanciones();
+  static Future<pw.Font> _loadMonoFont() async {
+    if (_monoFont != null) return _monoFont!;
+    final data = await rootBundle.load('assets/fonts/RobotoMono-Regular.ttf');
+    _monoFont = pw.Font.ttf(data);
+    return _monoFont!;
   }
 
-  /// Ordena alfabéticamente por título (ignorando acentos/mayúsculas).
-  /// Esto es solo para las LISTAS QUE SE MUESTRAN en pantalla (para que
-  /// sea fácil encontrar una canción) — no tiene relación con el orden en
-  /// que se comparte el PDF/texto.
-  List<Song> _ordenar(List<Song> lista) {
-    final copia = List<Song>.from(lista);
-    copia.sort((a, b) => a.title.toUpperCase().compareTo(b.title.toUpperCase()));
-    return copia;
-  }
+  // =======================================================================
+  // API PÚBLICA
+  // =======================================================================
 
-  Future<void> _cargarCanciones() async {
-    final adoracion = await SongRepository.instance.loadFromCache('adoracion');
-    final alabanza = await SongRepository.instance.loadFromCache('alabanza');
-    if (!mounted) return;
-    setState(() {
-      _adoracion = _ordenar(adoracion.isNotEmpty ? adoracion : cancionesCompletas);
-      _alabanza = _ordenar(alabanza.isNotEmpty ? alabanza : cancionesCompletas1);
-      _cargando = false;
-    });
-  }
+  static Future<Uint8List> generate({
+    required List<Song> canciones,
+    String? Function(Song song)? categoriaDe,
+    String? tituloRepertorio,
+    double fontSize = 10.5, // ← agregar
 
-  void _toggleSeleccion(Song song) {
-    setState(() {
-      if (_seleccionadas.containsKey(song.title)) {
-        _seleccionadas.remove(song.title);
-        _transposiciones.remove(song.title);
-      } else {
-        _seleccionadas[song.title] = song;
-      }
-    });
-  }
+  }) async {
+    final monoFont = await _loadMonoFont();
+    final doc = pw.Document();
 
-  void _ajustarTransposicion(Song song, int delta) {
-    setState(() {
-      final actual = _transposiciones[song.title] ?? 0;
-      _transposiciones[song.title] = actual + delta;
-    });
-  }
+    final tieneTitulo =
+        tituloRepertorio != null && tituloRepertorio.trim().isNotEmpty;
+    final mostrarPortada = canciones.length > 1 || tieneTitulo;
 
-  void _resetTransposicion(Song song) {
-    setState(() {
-      _transposiciones.remove(song.title);
-    });
-  }
-
-  /// Aplica la transposición elegida (si hay) a una canción, devolviendo
-  /// una copia nueva con el texto/tonalidad ya ajustados. La canción
-  /// original en _adoracion/_alabanza/caché nunca se modifica.
-  Song _conTransposicionAplicada(Song song) {
-    final semitones = _transposiciones[song.title] ?? 0;
-    if (semitones == 0) return song;
-
-    return Song(
-      title: song.title,
-      text: transposeSongText(song.text, semitones),
-      tonalidad: transposeKeyName(song.tonalidad, semitones),
-      tiempo: song.tiempo,
-      status: song.status,
-      instrument: song.instrument,
-      multitrackLink: song.multitrackLink,
-      youtubeLink: song.youtubeLink,
-      guitarLink: song.guitarLink,
-      pianoLink: song.pianoLink,
-      bassLink: song.bassLink,
-      drumsLink: song.drumsLink,
-      voicesLinks: song.voicesLinks,
-      textPlano: song.textPlano,
-      categoria: song.categoria,
-    );
-  }
-
-  /// Devuelve TODAS las canciones seleccionadas en el ORDEN REAL en que el
-  /// usuario las fue tocando (orden de inserción de `_seleccionadas`), con
-  /// la transposición de cada una ya aplicada. Esta es la única fuente que
-  /// debe alimentar el PDF y el texto compartido — reemplaza al viejo
-  /// `_seleccionadasDe()`, que reconstruía el orden desde las listas
-  /// alfabéticas (_adoracion/_alabanza) y por eso perdía el orden real de
-  /// selección del usuario.
-  List<Song> _seleccionadasEnOrden() {
-    return _seleccionadas.values.map(_conTransposicionAplicada).toList();
-  }
-
-  Future<void> _compartirComoPdf() async {
-    if (_seleccionadas.isEmpty) return;
-    final seleccionadasEnOrden = _seleccionadasEnOrden();
-    final total = seleccionadasEnOrden.length;
-
-    // Siempre preguntamos el título (aunque sea una sola canción), porque
-    // el caso de uso típico es "arma el repertorio para tal evento".
-    final titulo = await _pedirTitulo(esUnaSola: total == 1);
-    if (titulo == null || !mounted) return; // canceló el diálogo
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    try {
-      final bytes = await SongPdfGenerator.generate(
-        canciones: seleccionadasEnOrden,
-        categoriaDe: (song) => song.categoria,
-        tituloRepertorio: titulo,
-      );
-      if (!mounted) return;
-      Navigator.pop(context); // cierra el loading
-
-      final primeraCancion = seleccionadasEnOrden.first;
-      final nombreArchivo = titulo.isNotEmpty
-          ? '${_slug(titulo)}.pdf'
-          : total == 1
-              ? '${_slug(primeraCancion.title)}.pdf'
-              : '${_slug('repertorio')}.pdf';
-
-      await Printing.sharePdf(bytes: bytes, filename: nombreArchivo);
-    } catch (e) {
-      if (mounted) Navigator.pop(context);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No se pudo generar el PDF: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _compartirComoTexto() async {
-    if (_seleccionadas.isEmpty) return;
-    final canciones = _seleccionadasEnOrden();
-
-    final buffer = StringBuffer();
-    for (final s in canciones) {
-      buffer.writeln(s.title);
-      buffer.writeln('Tonalidad: ${s.tonalidad}');
-      if (s.tiempo > 0) buffer.writeln('Tiempo: ${s.tiempo} bpm');
-      buffer.writeln();
-      buffer.writeln(s.text.trim());
-      buffer.writeln('\n${'—' * 20}\n');
+    if (mostrarPortada) {
+      doc.addPage(_buildPortada(canciones, categoriaDe, tituloRepertorio));
     }
 
-    await Share.share(buffer.toString());
+    for (final cancion in canciones) {
+      doc.addPage(_buildSongPage(cancion, monoFont, fontSize));
+    }
+
+    return doc.save();
   }
 
-  Future<String?> _pedirTitulo({required bool esUnaSola}) async {
-    _tituloController.clear();
-    return showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppShapes.radiusMd)),
-        title: Text(esUnaSola ? 'Título del PDF (opcional)' : 'Nombre del repertorio'),
-        content: TextField(
-          controller: _tituloController,
-          autofocus: true,
-          decoration: InputDecoration(
-            hintText: 'Ej: Servicio Domingo',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppShapes.radiusSm)),
+  // =======================================================================
+  // PORTADA
+  // =======================================================================
+
+  static pw.Page _buildPortada(
+    List<Song> canciones,
+    String? Function(Song song)? categoriaDe,
+    String? titulo,
+  ) {
+    return pw.Page(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(36),
+      build: (context) => pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.SizedBox(height: 60),
+          pw.Text(
+            titulo?.isNotEmpty == true ? titulo! : 'Repertorio',
+            style: pw.TextStyle(
+              fontSize: 28,
+              fontWeight: pw.FontWeight.bold,
+              color: _titleColor,
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, null),
-            child: const Text('Cancelar'),
+          pw.SizedBox(height: 4),
+          pw.Text(
+            'MCLV MusicApp',
+            style: pw.TextStyle(fontSize: 12, color: _chordColor),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, _tituloController.text.trim()),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.gold),
-            child: const Text('Continuar'),
-          ),
+          pw.SizedBox(height: 30),
+          pw.Divider(color: _keywordColor, thickness: 2),
+          pw.SizedBox(height: 20),
+          ..._buildIndice(canciones, categoriaDe),
         ],
       ),
     );
   }
 
-  String _slug(String s) {
-    return s
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9áéíóúñ ]', caseSensitive: false), '')
-        .replaceAll(' ', '_');
-  }
-
-  Widget _buildLista(List<Song> canciones, AppThemeData t) {
-    if (canciones.isEmpty) {
-      return Center(
-        child: Text(
-          'No hay canciones disponibles.',
-          style: TextStyle(color: t.textSecondary),
-        ),
-      );
-    }
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-      itemCount: canciones.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (context, index) {
-        final song = canciones[index];
-        final seleccionada = _seleccionadas.containsKey(song.title);
-        final semitones = _transposiciones[song.title] ?? 0;
-        return _SongPickTile(
-          song: song,
-          selected: seleccionada,
-          semitones: semitones,
-          themeData: t,
-          onTap: () => _toggleSeleccion(song),
-          onTransposeUp: () => _ajustarTransposicion(song, 1),
-          onTransposeDown: () => _ajustarTransposicion(song, -1),
-          onTransposeReset: () => _resetTransposicion(song),
-        );
-      },
-    );
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    _tituloController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = AppThemeData.of(context);
-    final int count = _seleccionadas.length;
-
-    return Scaffold(
-      backgroundColor: t.background,
-      appBar: AppBar(
-        title: const Text('Compartir canciones'),
-        backgroundColor: t.appBarBackground,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: AppColors.gold,
-          indicatorWeight: 3,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white60,
-          labelStyle: const TextStyle(fontWeight: FontWeight.w700),
-          tabs: const [
-            Tab(text: 'Adoración'),
-            Tab(text: 'Alabanza'),
+  static List<pw.Widget> _buildIndice(
+    List<Song> canciones,
+    String? Function(Song song)? categoriaDe,
+  ) {
+    return List.generate(canciones.length, (i) {
+      final song = canciones[i];
+      final categoria = categoriaDe?.call(song);
+      return pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 5),
+        child: pw.Row(
+          children: [
+            pw.Container(
+              width: 24,
+              child: pw.Text(
+                '${i + 1}.',
+                style: pw.TextStyle(
+                  fontSize: 13,
+                  fontWeight: pw.FontWeight.bold,
+                  color: _chordColor,
+                ),
+              ),
+            ),
+            pw.Expanded(
+              child: pw.Text(
+                song.title,
+                style: pw.TextStyle(fontSize: 13, color: _textColor),
+              ),
+            ),
+            if (categoria != null && categoria.isNotEmpty)
+              pw.Container(
+                margin: const pw.EdgeInsets.only(right: 8),
+                padding: const pw.EdgeInsets.symmetric(
+                  horizontal: 6, vertical: 2,
+                ),
+                decoration: pw.BoxDecoration(
+                  color: PdfColor.fromInt(0xFFF5F1E8),
+                  borderRadius: pw.BorderRadius.circular(3),
+                ),
+                child: pw.Text(
+                  categoria,
+                  style: pw.TextStyle(fontSize: 9, color: _chordColor),
+                ),
+              ),
+            pw.Text(
+              song.tonalidad,
+              style: pw.TextStyle(
+                fontSize: 11,
+                color: _chordColor,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
           ],
         ),
-      ),
-      body: _cargando
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                if (count > 0)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    color: AppColors.gold.withOpacity(0.08),
-                    child: Text(
-                      '🎚 Toca +/- junto a una canción para transponerla SOLO en este PDF/texto. '
-                      'No afecta la canción en la app.',
-                      style: TextStyle(fontSize: 12, color: t.textSecondary),
-                    ),
-                  ),
-                Expanded(
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _buildLista(_adoracion, t),
-                      _buildLista(_alabanza, t),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-      bottomNavigationBar: count == 0
-          ? null
-          : SafeArea(
-              child: Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: AppShapes.softCard(
-                  color: t.cardColor,
-                  radius: AppShapes.radiusMd,
-                  dark: t.isDark,
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppColors.gold.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(AppShapes.radiusSm),
-                      ),
-                      child: Text(
-                        '$count',
-                        style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.gold),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        count == 1 ? 'canción seleccionada' : 'canciones seleccionadas',
-                        style: TextStyle(fontWeight: FontWeight.w500, color: t.textPrimary),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: _compartirComoTexto,
-                      icon: Icon(Icons.text_snippet_outlined, color: t.textSecondary),
-                      tooltip: 'Compartir como texto',
-                    ),
-                    FilledButton.icon(
-                      onPressed: _compartirComoPdf,
-                      icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-                      label: const Text('PDF'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.gold,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppShapes.radiusSm)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+      );
+    });
+  }
+
+  // =======================================================================
+  // PÁGINA DE CANCIÓN — MultiPage, 1 columna, corte por secciones
+  // =======================================================================
+
+// _buildSongPage recibe fontSize:
+  static pw.MultiPage _buildSongPage(Song cancion, pw.Font monoFont, double fontSize) {
+    final lineas = cancion.text.split('\n');
+
+    return pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: _pageMargin,
+      header: (context) => context.pageNumber == 1
+          ? _buildEncabezado(cancion)
+          : pw.SizedBox(),
+      build: (context) => lineas
+          .map((linea) => _buildLineaWidget(linea, monoFont, fontSize))
+          .toList(),
     );
   }
-}
 
-/// Tarjeta de canción seleccionable: reemplaza al CheckboxListTile genérico
-/// por algo con el mismo lenguaje visual que el resto de la app (softCard +
-/// borde dorado cuando está seleccionada), simple y sin adornos de más.
-///
-/// Cuando está seleccionada, muestra además un control +/- para transponer
-/// SOLO en esta exportación, con la tonalidad resultante como referencia.
-class _SongPickTile extends StatelessWidget {
-  final Song song;
-  final bool selected;
-  final int semitones;
-  final AppThemeData themeData;
-  final VoidCallback onTap;
-  final VoidCallback onTransposeUp;
-  final VoidCallback onTransposeDown;
-  final VoidCallback onTransposeReset;
+  // =======================================================================
+  // ENCABEZADO
+  // =======================================================================
 
-  const _SongPickTile({
-    required this.song,
-    required this.selected,
-    required this.semitones,
-    required this.themeData,
-    required this.onTap,
-    required this.onTransposeUp,
-    required this.onTransposeDown,
-    required this.onTransposeReset,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t = themeData;
-    final String tonalidadMostrada =
-        semitones == 0 ? song.tonalidad : transposeKeyName(song.tonalidad, semitones);
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppShapes.radiusMd),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: t.cardColor,
-            borderRadius: BorderRadius.circular(AppShapes.radiusMd),
-            border: Border.all(
-              color: selected ? AppColors.gold : Colors.transparent,
-              width: 1.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: t.isDark ? Colors.black.withOpacity(0.35) : AppColors.charcoal.withOpacity(0.06),
-                blurRadius: t.isDark ? 10 : 14,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    width: 24,
-                    height: 24,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: selected ? AppColors.gold : Colors.transparent,
-                      border: Border.all(
-                        color: selected ? AppColors.gold : t.textSecondary.withOpacity(0.4),
-                        width: 2,
-                      ),
-                    ),
-                    child: selected
-                        ? const Icon(Icons.check, size: 16, color: Colors.white)
-                        : null,
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          song.title,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: t.textPrimary,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Row(
-                          children: [
-                            Text(
-                              tonalidadMostrada,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: semitones == 0 ? t.textSecondary : AppColors.gold,
-                                fontWeight: semitones == 0 ? FontWeight.normal : FontWeight.w700,
-                              ),
-                            ),
-                            if (semitones != 0) ...[
-                              const SizedBox(width: 4),
-                              Text(
-                                '(original ${song.tonalidad})',
-                                style: TextStyle(fontSize: 11, color: t.textSecondary.withOpacity(0.7)),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              if (selected) ...[
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    _TransposeMiniButton(icon: Icons.remove, onTap: onTransposeDown),
-                    Container(
-                      constraints: const BoxConstraints(minWidth: 34),
-                      alignment: Alignment.center,
-                      child: Text(
-                        semitones == 0 ? '±0' : (semitones > 0 ? '+$semitones' : '$semitones'),
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: semitones == 0 ? t.textSecondary : AppColors.gold,
-                        ),
-                      ),
-                    ),
-                    _TransposeMiniButton(icon: Icons.add, onTap: onTransposeUp),
-                    if (semitones != 0) ...[
-                      const SizedBox(width: 6),
-                      GestureDetector(
-                        onTap: onTransposeReset,
-                        child: Text(
-                          'restablecer',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: t.textSecondary,
-                            decoration: TextDecoration.underline,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ],
+  static pw.Widget _buildEncabezado(Song cancion) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text(
+          cancion.title,
+          style: pw.TextStyle(
+            fontSize: 22,
+            fontWeight: pw.FontWeight.bold,
+            color: _titleColor,
           ),
         ),
+        pw.SizedBox(height: 6),
+        pw.Row(
+          children: [
+            _buildTag('Tonalidad: ${cancion.tonalidad}'),
+            pw.SizedBox(width: 10),
+            if (cancion.tiempo > 0) _buildTag('${cancion.tiempo} bpm'),
+          ],
+        ),
+        pw.SizedBox(height: 8),
+        pw.Divider(color: PdfColors.grey400),
+        pw.SizedBox(height: 12),
+      ],
+    );
+  }
+
+  static pw.Widget _buildTag(String text) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: pw.BoxDecoration(
+        color: PdfColor.fromInt(0xFFF5F1E8),
+        borderRadius: pw.BorderRadius.circular(4),
+      ),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(fontSize: 10, color: _chordColor),
       ),
     );
   }
-}
 
-class _TransposeMiniButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
+  // =======================================================================
+  // WIDGET DE LÍNEA INDIVIDUAL
+  // =======================================================================
 
-  const _TransposeMiniButton({required this.icon, required this.onTap});
+// _buildLineaWidget recibe fontSize:
+static pw.Widget _buildLineaWidget(String linea, pw.Font monoFont, double fontSize) {
+  if (linea.trim().isEmpty) return pw.SizedBox(height: 5);
 
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(50),
-      onTap: onTap,
-      child: Container(
-        width: 30,
-        height: 30,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: AppColors.gold.withOpacity(0.12),
-          shape: BoxShape.circle,
+
+    final matches = <RegExpMatch>[
+      ..._keywordColorRegex.allMatches(linea), // ← colorRegex aquí
+      ..._chordRegex.allMatches(linea),
+    ]..sort((a, b) => a.start.compareTo(b.start));
+
+    final filtrados = <RegExpMatch>[];
+    int lastEnd = 0;
+    for (final m in matches) {
+      if (m.start >= lastEnd) {
+        filtrados.add(m);
+        lastEnd = m.end;
+      }
+    }
+
+    final spans = <pw.TextSpan>[];
+    int current = 0;
+
+    for (final match in filtrados) {
+      if (match.start > current) {
+        spans.add(pw.TextSpan(
+          text: linea.substring(current, match.start),
+          style: pw.TextStyle(font: monoFont, fontSize: _lyricsFontSize),
+        ));
+      }
+      final token = match.group(0)!;
+      final esKeyword = _keywordColorRegex.hasMatch(token); // ← colorRegex aquí
+      spans.add(pw.TextSpan(
+        text: token,
+        style: pw.TextStyle(
+          font: monoFont,
+          fontSize: _lyricsFontSize,
+          color: esKeyword ? _keywordColor : _chordColor,
+          fontWeight: esKeyword ? pw.FontWeight.bold : pw.FontWeight.normal,
         ),
-        child: Icon(icon, size: 16, color: AppColors.gold),
-      ),
+      ));
+      current = match.end;
+    }
+
+    if (current < linea.length) {
+      spans.add(pw.TextSpan(
+        text: linea.substring(current),
+        style: pw.TextStyle(font: monoFont, fontSize: _lyricsFontSize),
+      ));
+    }
+
+    return pw.RichText(
+      text: pw.TextSpan(children: spans),
+      softWrap: false,
     );
   }
 }
